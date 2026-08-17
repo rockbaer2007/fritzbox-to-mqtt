@@ -343,9 +343,9 @@ class FritzBoxTr064Client:
         ]:
             try:
                 info = self._soap("/upnp/control/x_dect", DECT_SERVICE, action, {argument_name: index})
-                internal = first_value(info, ["NewIntern", "NewInternalNumber", "NewHandsetNumber", "NewID"])
-                device = first_value(info, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"])
-                no_ring_time = first_value(info, [
+                internal = number_value(info, ["NewIntern", "NewInternalNumber", "NewHandsetNumber"])
+                device = number_value(info, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"])
+                no_ring_time = no_ring_time_value(info, [
                     "NewNoRingTime",
                     "NewNoRingTimeTime",
                     "NewNoRingTimeRange",
@@ -355,8 +355,8 @@ class FritzBoxTr064Client:
                 name = first_value(info, ["NewName", "NewHandsetName", "NewModel"])
                 return DectLineInfo(
                     index=index,
-                    internal_number=internal or str(index),
-                    device_number=device or str(index),
+                    internal_number=internal,
+                    device_number=device,
                     no_ring_time=no_ring_time,
                     name=name,
                 )
@@ -1013,7 +1013,7 @@ class HomeAssistantMqttPublisher:
                 "unique_id": f"fritzbox_tr064_dect{index}_intern",
                 "state_topic": f"{prefix}/intern",
                 "json_attributes_topic": f"{prefix}/attributes",
-                "icon": "mdi:phone-classic",
+                "icon": "mdi:numeric",
                 "device": self._device(),
             })
             self._publish_config("sensor", f"dect{index}_device", {
@@ -1506,6 +1506,30 @@ def first_value(values: dict[str, Any], names: list[str]) -> str:
         if value:
             return value
     return ""
+
+
+def no_ring_time_value(values: dict[str, Any], names: list[str]) -> str:
+    for name in names:
+        if "flags" in name.lower():
+            continue
+        value = str(values.get(name, "")).strip()
+        if value:
+            return value
+    for name, value in values.items():
+        lower_name = name.lower()
+        if "noringtime" in lower_name and "flags" not in lower_name:
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
+
+
+def number_value(values: dict[str, Any], names: list[str]) -> str:
+    value = first_value(values, names)
+    if value.isdigit():
+        return value
+    match = re.search(r"\d+", value)
+    return match.group(0) if match else ""
 
 
 def find_text(element: ET.Element, local_name: str) -> str:

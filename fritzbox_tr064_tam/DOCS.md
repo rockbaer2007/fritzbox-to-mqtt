@@ -25,7 +25,7 @@ MQTT discovery uses the prefix `homeassistant`, base topic `fritzbox/tr064`, pol
 Only readable FRITZ!Box features are published to Home Assistant; missing optional services are hidden in normal logs and skipped in discovery.
 Current WAN upload/download rates use TR-064. Port `1012` is only the live call monitor and does not provide bandwidth data.
 Additional box status sensors include text sensors for `box_meshRole`, `box_ppp_connect`, `ipv4_extern` (`Box PPP IPv4 Extern`), and `ipv6_extern` (`Box IPv6 Extern`), plus binary sensors for `box_dect` and `box_dns_over_tls` where the FRITZ!Box exposes them. Missing text values are published as `unknown`.
-If `include_dect_lines` is true, the add-on also publishes `dect*_intern`, `dect*_device`, and `dect*_NoRingTime` sensors up to `max_dect_lines`. The Home Assistant sensor names use the FRITZ!Box handset name when available.
+If `include_dect_lines` is true, the add-on also publishes `dect*_intern`, `dect*_device`, and `dect*_NoRingTime` sensors up to `max_dect_lines`. The Home Assistant sensor names use the FRITZ!Box handset name when available. `intern` and `device` publish numeric values only; `NoRingTime` ignores `NoRingTimeFlags`.
 
 `call_lists` is a comma-separated selection of:
 
