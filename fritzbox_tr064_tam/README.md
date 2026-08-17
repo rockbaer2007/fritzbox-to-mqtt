@@ -65,7 +65,7 @@ The SSID is exposed as an attribute and is not used as the entity name.
 The visible configuration mask contains only:
 
 ```yaml
-ip: fritz.box
+ip: 192.168.178.1
 port: 49000
 user: homeassistant
 password: secret

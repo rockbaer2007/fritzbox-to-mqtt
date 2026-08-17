@@ -3,7 +3,7 @@
 Example:
 
 ```yaml
-ip: fritz.box
+ip: 192.168.178.1
 port: 49000
 user: homeassistant
 password: secret

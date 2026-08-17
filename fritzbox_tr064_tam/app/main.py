@@ -791,7 +791,7 @@ def load_options() -> Options:
             raw = json.load(file)
     else:
         raw = {
-            "fritz_host": os.getenv("FRITZ_HOST", "fritz.box"),
+            "fritz_host": os.getenv("FRITZ_HOST", "192.168.178.1"),
             "fritz_port": int(os.getenv("FRITZ_PORT", "49000")),
             "fritz_ssl": os.getenv("FRITZ_SSL", "false").lower() == "true",
             "fritz_username": os.getenv("FRITZ_USERNAME", ""),
@@ -802,7 +802,7 @@ def load_options() -> Options:
             "mqtt_password": os.getenv("MQTT_PASSWORD", ""),
         }
     return Options(
-        fritz_host=str(raw.get("ip", raw.get("fritz_host", "fritz.box"))),
+        fritz_host=str(raw.get("ip", raw.get("fritz_host", "192.168.178.1"))),
         fritz_port=int(raw.get("port", raw.get("fritz_port", 49000))),
         fritz_ssl=bool(raw.get("fritz_ssl", False)),
         fritz_username=str(raw.get("user", raw.get("fritz_username", ""))),
