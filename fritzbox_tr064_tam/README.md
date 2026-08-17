@@ -131,4 +131,5 @@ The default maps phonebook `3` to `tellows Sperrliste 7` and phonebook `4` to `t
 `phonebook_name_excludes` hides matching FRITZ!Box phonebook names from the list, for example `tellows`.
 `dns_over_tls_enabled` is only the fallback value for `Box DNS over TLS` when `query.lua` does not return `dnscfg:settings/dns_over_tls_enabled`.
 Mesh role uses TR-064 mesh XML first and falls back to the FHEM-style `data.lua?page=wlanmesh` query.
+If no mesh role source returns a value, `Box Mesh Rolle` publishes the FHEM default `master`.
 `log_value_details` writes the relevant raw TR-064 response dictionaries and normalized publish values to the add-on log. Set it to `false` after troubleshooting if the log should be quieter.

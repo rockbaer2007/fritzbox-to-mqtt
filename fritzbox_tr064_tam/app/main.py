@@ -335,6 +335,8 @@ class FritzBoxTr064Client:
             self._log_value_error("Box DeviceInfo GetInfo", exc)
             LOG.debug("Could not read mesh role: %s", exc)
         self._read_mesh_role(result)
+        if not result.get("box_meshRole"):
+            result["box_meshRole"] = "master"
         self._read_fritzsmart_query_values(result)
 
         for control_url in self._control_urls_for_service(WAN_PPP_SERVICE, [
@@ -433,17 +435,18 @@ class FritzBoxTr064Client:
     def _read_mesh_role(self, result: dict[str, Any]) -> None:
         if result.get("box_meshRole"):
             return
+        self._read_mesh_role_lua(result)
+        if result.get("box_meshRole"):
+            return
         try:
             mesh_path = self._soap("/upnp/control/hosts", HOSTS_SERVICE, "X_AVM-DE_GetMeshListPath", {})
             self._log_values("Hosts X_AVM-DE_GetMeshListPath", mesh_path)
             path = first_value(mesh_path, ["NewX_AVM-DE_MeshListPath", "NewX_AVM_DE_MeshListPath"])
             if not path:
-                self._read_mesh_role_lua(result)
                 return
             root = self._get_xml_url(path)
         except Exception as exc:
             self._log_value_error("Hosts X_AVM-DE_GetMeshListPath", exc)
-            self._read_mesh_role_lua(result)
             return
         role = mesh_role_from_xml(root, self.options.fritz_host)
         if role:
@@ -1947,8 +1950,9 @@ def first_nested_value(values: dict[str, Any], paths: list[list[str]]) -> str:
 
 
 def fritz_login_response(challenge: str, password: str) -> str:
-    if challenge.startswith("2$"):
-        parts = challenge.split("$")
+    normalized = challenge[1:] if challenge.startswith("$2$") else challenge
+    if normalized.startswith("2$"):
+        parts = normalized.split("$")
         if len(parts) >= 5:
             iter1 = int(parts[1])
             salt1 = bytes.fromhex(parts[2])
