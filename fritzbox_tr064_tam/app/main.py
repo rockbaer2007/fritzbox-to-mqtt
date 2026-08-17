@@ -19,7 +19,7 @@ import requests
 from requests.auth import HTTPDigestAuth
 
 
-LOG = logging.getLogger("fritzbox_tr064_tam")
+LOG = logging.getLogger("fritzbox_to_mqtt")
 SOAP_ENV = "http://schemas.xmlsoap.org/soap/envelope/"
 TAM_SERVICE = "urn:dslforum-org:service:X_AVM-DE_TAM:1"
 ONTEL_SERVICE = "urn:dslforum-org:service:X_AVM-DE_OnTel:1"
@@ -792,7 +792,7 @@ class FritzBoxTr064Client:
                 ),
             })
             self._log_values("Lua query dectUser", values)
-            self._dect_user_entries = dict_list(values.get("dectUser", []))
+            self._dect_user_entries = dict_list(values.get("dectUser") or values)
         except Exception as exc:
             self._log_value_error("Lua query dectUser", exc)
             self._dect_user_entries = []
@@ -967,7 +967,7 @@ class HomeAssistantMqttPublisher:
     def __init__(self, options: Options, fritz: FritzBoxTr064Client) -> None:
         self.options = options
         self.fritz = fritz
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="fritzbox-tr064-tam")
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="fritzbox-to-mqtt")
         if options.mqtt_username:
             self.client.username_pw_set(options.mqtt_username, options.mqtt_password)
         self.known_tam_indices: set[int] = set()
@@ -1588,7 +1588,7 @@ class HomeAssistantMqttPublisher:
     def _device() -> dict[str, Any]:
         return {
             "identifiers": ["fritzbox_tr064"],
-            "name": "FRITZ!Box TR-064",
+            "name": "FRITZ!Box to MQTT",
             "manufacturer": "AVM",
             "model": "FRITZ!Box",
         }
@@ -1752,7 +1752,7 @@ def load_options() -> Options:
         mqtt_username=str(os.getenv("MQTT_USERNAME", raw.get("mqtt_username", ""))),
         mqtt_password=str(os.getenv("MQTT_PASSWORD", raw.get("mqtt_password", ""))),
         discovery_prefix=str(raw.get("discovery_prefix", "homeassistant")).strip("/"),
-        base_topic=str(raw.get("base_topic", "fritzbox/tr064")).strip("/"),
+        base_topic=str(raw.get("base_topic", "fritzbox")).strip("/"),
         poll_interval=int(raw.get("poll_interval", 60)),
         max_tam=max(1, min(5, int(raw.get("max_tam", 5)))),
         max_wlan=max(1, min(5, int(raw.get("max_wlan", 4)))),
@@ -2111,13 +2111,13 @@ def no_ring_time_value(values: dict[str, Any], names: list[str]) -> str:
             continue
         value = str(values.get(name, "")).strip()
         if value:
-            return value
+            return normalize_no_ring_time(value)
     for name, value in values.items():
         lower_name = name.lower()
         if "noringtime" in lower_name and "flags" not in lower_name:
             text = str(value).strip()
             if text:
-                return text
+                return normalize_no_ring_time(text)
     return ""
 
 
@@ -2153,10 +2153,21 @@ def format_lua_no_ring_time(values: dict[str, Any]) -> str:
     value = str(values.get("NoRingTime", "")).strip()
     if not value:
         return ""
-    if value.isdigit() and len(value) == 8:
-        value = f"{value[0:2]}:{value[2:4]}-{value[4:6]}:{value[6:8]}"
+    value = normalize_no_ring_time(value)
+    if re.search(r"[A-Za-z]", value):
+        return value
     day_prefix = ring_allowed_label(values.get("RingAllowed"))
     return f"{day_prefix} {value}".strip()
+
+
+def normalize_no_ring_time(value: str) -> str:
+    text = value.strip()
+    digits = re.sub(r"\D", "", text)
+    if text.isdigit() and len(text) == 8:
+        return f"{text[0:2]}:{text[2:4]}-{text[4:6]}:{text[6:8]}"
+    if len(digits) == 8 and ":" not in text and "-" not in text:
+        return f"{digits[0:2]}:{digits[2:4]}-{digits[4:6]}:{digits[6:8]}"
+    return text
 
 
 def ring_allowed_label(value: Any) -> str:
