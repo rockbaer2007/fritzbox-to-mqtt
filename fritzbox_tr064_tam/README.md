@@ -22,8 +22,20 @@ WAN entities:
 - `Downloadrate`
 - `Uploadrate`
 - `WAN Link Status`
+- `Box Mesh Rolle`
+- `Box PPP Verbindung`
+- `IPv4 extern`
+- `IPv6 extern`
+- `Box DECT`
+- `Box DNS over TLS`
 
 Current upload/download rates use TR-064 WAN data. If the FRITZ!Box does not expose direct rate values, the add-on calculates them from total byte counters between polls.
+
+Optional DECT line entities, if `include_dect_lines` is true:
+
+- `DECT0 intern`
+- `DECT1 intern`
+- further detected DECT lines
 
 Call list entities, depending on `call_lists`:
 
@@ -93,6 +105,8 @@ call_monitor_enabled: true
 call_monitor_port: 1012
 max_calls: 20
 max_live_events: 20
+include_dect_lines: false
+max_dect_lines: 6
 ```
 
 MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.

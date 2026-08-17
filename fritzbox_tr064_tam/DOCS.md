@@ -15,6 +15,8 @@ call_monitor_enabled: true
 call_monitor_port: 1012
 max_calls: 20
 max_live_events: 20
+include_dect_lines: false
+max_dect_lines: 6
 ```
 
 The visible Home Assistant add-on configuration asks for the FRITZ!Box connection and display choices.
@@ -22,6 +24,8 @@ MQTT host, port, username and password are requested from Home Assistant's inter
 MQTT discovery uses the prefix `homeassistant`, base topic `fritzbox/tr064`, polling every 60 seconds, up to five answering machines and up to four WLAN services.
 Only readable FRITZ!Box features are published to Home Assistant; missing optional services are hidden in normal logs and skipped in discovery.
 Current WAN upload/download rates use TR-064. Port `1012` is only the live call monitor and does not provide bandwidth data.
+Additional box status sensors include `box_meshRole`, `box_ppp_connect`, `ipv4_extern`, `ipv6_extern`, `box_dect`, and `box_dns_over_tls` where the FRITZ!Box exposes them.
+If `include_dect_lines` is true, the add-on also publishes `dect*_intern` sensors up to `max_dect_lines`.
 
 `call_lists` is a comma-separated selection of:
 

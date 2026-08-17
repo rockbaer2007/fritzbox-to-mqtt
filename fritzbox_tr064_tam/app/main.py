@@ -22,7 +22,11 @@ LOG = logging.getLogger("fritzbox_tr064_tam")
 SOAP_ENV = "http://schemas.xmlsoap.org/soap/envelope/"
 TAM_SERVICE = "urn:dslforum-org:service:X_AVM-DE_TAM:1"
 ONTEL_SERVICE = "urn:dslforum-org:service:X_AVM-DE_OnTel:1"
+DEVICE_INFO_SERVICE = "urn:dslforum-org:service:DeviceInfo:1"
 WAN_COMMON_SERVICE = "urn:dslforum-org:service:WANCommonInterfaceConfig:1"
+WAN_IP_SERVICE = "urn:schemas-upnp-org:service:WANIPConnection:1"
+WAN_PPP_SERVICE = "urn:schemas-upnp-org:service:WANPPPConnection:1"
+DECT_SERVICE = "urn:dslforum-org:service:X_AVM-DE_DECT:1"
 WLAN_SERVICE_TEMPLATE = "urn:dslforum-org:service:WLANConfiguration:{index}"
 CALL_VIEW_LABELS = {
     "all": "Anrufliste Alle",
@@ -71,6 +75,8 @@ class Options:
     call_monitor_port: int
     max_calls: int
     max_live_events: int
+    include_dect_lines: bool
+    max_dect_lines: int
     retain: bool
 
 
@@ -111,6 +117,13 @@ class PhonebookInfo:
     phonebook_id: str
     name: str
     contacts: list[dict[str, str]]
+
+
+@dataclass(frozen=True)
+class DectLineInfo:
+    index: int
+    internal_number: str
+    name: str
 
 
 @dataclass(frozen=True)
@@ -246,6 +259,79 @@ class FritzBoxTr064Client:
             LOG.debug("Could not read WAN total bytes received: %s", exc)
 
         return result
+
+    def get_box_status(self, include_dect_lines: bool, max_dect_lines: int) -> tuple[dict[str, Any], list[DectLineInfo]]:
+        result: dict[str, Any] = {}
+        dect_lines: list[DectLineInfo] = []
+        try:
+            info = self._soap("/upnp/control/deviceinfo", DEVICE_INFO_SERVICE, "GetInfo", {})
+            result["box_meshRole"] = first_value(info, [
+                "NewX_AVM-DE_MeshRole",
+                "NewX_AVM_DE_MeshRole",
+                "NewMeshRole",
+            ])
+        except Exception as exc:
+            LOG.debug("Could not read mesh role: %s", exc)
+
+        self._read_wan_connection_status(result, WAN_PPP_SERVICE, "/upnp/control/wanpppconn1")
+        if not result.get("box_ppp_connect") or not result.get("ipv4_extern"):
+            self._read_wan_connection_status(result, WAN_IP_SERVICE, "/upnp/control/wanipconnection1")
+
+        try:
+            dect = self._soap("/upnp/control/x_dect", DECT_SERVICE, "GetNumberOfDectEntries", {})
+            count = as_int(first_value(dect, ["NewNumberOfEntries", "NewNumberOfDectEntries"]))
+            result["box_dect"] = count > 0
+            if include_dect_lines:
+                for index in range(min(count, max_dect_lines)):
+                    line = self._get_dect_line(index)
+                    if line is not None:
+                        dect_lines.append(line)
+        except Exception as exc:
+            LOG.debug("Could not read DECT info: %s", exc)
+
+        result.setdefault("box_dns_over_tls", None)
+        return result, dect_lines
+
+    def _read_wan_connection_status(self, result: dict[str, Any], service: str, control_url: str) -> None:
+        try:
+            status = self._soap(control_url, service, "GetStatusInfo", {})
+            connection_status = str(status.get("NewConnectionStatus", "")).strip()
+            if connection_status:
+                result["box_ppp_connect"] = connection_status
+        except Exception as exc:
+            LOG.debug("Could not read WAN status %s: %s", control_url, exc)
+        try:
+            external = self._soap(control_url, service, "GetExternalIPAddress", {})
+            ipv4 = str(external.get("NewExternalIPAddress", "")).strip()
+            if ipv4:
+                result["ipv4_extern"] = ipv4
+        except Exception as exc:
+            LOG.debug("Could not read external IPv4 %s: %s", control_url, exc)
+        try:
+            info = self._soap(control_url, service, "GetInfo", {})
+            ipv6 = first_value(info, [
+                "NewX_AVM-DE_ExternalIPv6Address",
+                "NewX_AVM_DE_ExternalIPv6Address",
+                "NewExternalIPv6Address",
+            ])
+            if ipv6:
+                result["ipv6_extern"] = ipv6
+        except Exception as exc:
+            LOG.debug("Could not read external IPv6 %s: %s", control_url, exc)
+
+    def _get_dect_line(self, index: int) -> DectLineInfo | None:
+        for action, argument_name in [
+            ("GetGenericDectEntry", "NewIndex"),
+            ("GetDECTHandsetInfo", "NewDectID"),
+        ]:
+            try:
+                info = self._soap("/upnp/control/x_dect", DECT_SERVICE, action, {argument_name: index})
+                internal = first_value(info, ["NewIntern", "NewInternalNumber", "NewHandsetNumber", "NewID"])
+                name = first_value(info, ["NewName", "NewHandsetName", "NewModel"])
+                return DectLineInfo(index=index, internal_number=internal or str(index), name=name)
+            except Exception as exc:
+                LOG.debug("Could not read DECT line %s with %s: %s", index, action, exc)
+        return None
 
     def get_call_entries(self) -> list[CallEntry]:
         result = self._soap("/upnp/control/x_contact", ONTEL_SERVICE, "GetCallList", {})
@@ -397,6 +483,7 @@ class HomeAssistantMqttPublisher:
         call_views: set[str],
         phonebook_ids: set[str],
         all_phonebooks: list[PhonebookInfo],
+        dect_lines: list[DectLineInfo],
     ) -> None:
         for index in range(self.options.max_tam):
             if index in present_tam_indices:
@@ -421,6 +508,9 @@ class HomeAssistantMqttPublisher:
         self._publish_phonebook_overview_discovery()
         self._publish_phonebook_select_discovery(all_phonebooks)
         self._publish_call_monitor_discovery()
+        self._publish_box_status_discovery()
+        if self.options.include_dect_lines:
+            self._publish_dect_line_discovery(dect_lines)
         self._publish_wan_discovery()
         self.known_tam_indices = set(present_tam_indices)
         self.known_wlan_indices = set(present_wlan_indices)
@@ -436,6 +526,8 @@ class HomeAssistantMqttPublisher:
         call_views: set[str],
         phonebooks: list[PhonebookInfo],
         all_phonebooks: list[PhonebookInfo],
+        box_status: dict[str, Any],
+        dect_lines: list[DectLineInfo],
     ) -> None:
         for info in tam_infos:
             prefix = f"{self.options.base_topic}/ab/{info.index}"
@@ -500,6 +592,17 @@ class HomeAssistantMqttPublisher:
             self._publish(f"{self.options.base_topic}/wan/download_kbit_s", format_kbit_per_second(wan["byte_receive_rate"]))
         if "physical_link_status" in wan:
             self._publish(f"{self.options.base_topic}/wan/link_status", str(wan["physical_link_status"]))
+
+        self._publish_box_status_states(box_status)
+        if self.options.include_dect_lines:
+            for line in dect_lines:
+                prefix = f"{self.options.base_topic}/dect/{line.index}"
+                self._publish(f"{prefix}/intern", line.internal_number)
+                self._publish_json(f"{prefix}/attributes", {
+                    "dect_index": line.index,
+                    "name": line.name,
+                    "internal_number": line.internal_number,
+                })
 
     def publish_call_monitor_state(self, event: CallMonitorEvent | None = None) -> None:
         prefix = f"{self.options.base_topic}/call_monitor"
@@ -811,6 +914,65 @@ class HomeAssistantMqttPublisher:
             "device": self._device(),
         })
 
+    def _publish_box_status_discovery(self) -> None:
+        sensors = [
+            ("box_meshRole", "Box Mesh Rolle", "box/meshRole", "mdi:hubspot"),
+            ("box_ppp_connect", "Box PPP Verbindung", "box/ppp_connect", "mdi:wan"),
+            ("ipv4_extern", "IPv4 extern", "box/ipv4_extern", "mdi:ip-network"),
+            ("ipv6_extern", "IPv6 extern", "box/ipv6_extern", "mdi:ip-network-outline"),
+            ("box_dns_over_tls", "Box DNS over TLS", "box/dns_over_tls", "mdi:dns"),
+        ]
+        for object_id, name, state_path, icon in sensors:
+            self._publish_config("sensor", object_id, {
+                "name": name,
+                "unique_id": f"fritzbox_tr064_{object_id}",
+                "state_topic": f"{self.options.base_topic}/{state_path}",
+                "icon": icon,
+                "device": self._device(),
+            })
+        self._publish_config("binary_sensor", "box_dect", {
+            "name": "Box DECT",
+            "unique_id": "fritzbox_tr064_box_dect",
+            "state_topic": f"{self.options.base_topic}/box/dect",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:phone-classic",
+            "device": self._device(),
+        })
+
+    def _publish_dect_line_discovery(self, dect_lines: list[DectLineInfo]) -> None:
+        present = {line.index for line in dect_lines}
+        for index in range(self.options.max_dect_lines):
+            if index not in present:
+                self._publish(
+                    f"{self.options.discovery_prefix}/sensor/fritzbox_tr064/dect{index}_intern/config",
+                    "",
+                    retain=True,
+                )
+                continue
+            prefix = f"{self.options.base_topic}/dect/{index}"
+            self._publish_config("sensor", f"dect{index}_intern", {
+                "name": f"DECT{index} intern",
+                "unique_id": f"fritzbox_tr064_dect{index}_intern",
+                "state_topic": f"{prefix}/intern",
+                "json_attributes_topic": f"{prefix}/attributes",
+                "icon": "mdi:phone-classic",
+                "device": self._device(),
+            })
+
+    def _publish_box_status_states(self, status: dict[str, Any]) -> None:
+        for key, path in [
+            ("box_meshRole", "box/meshRole"),
+            ("box_ppp_connect", "box/ppp_connect"),
+            ("ipv4_extern", "box/ipv4_extern"),
+            ("ipv6_extern", "box/ipv6_extern"),
+            ("box_dns_over_tls", "box/dns_over_tls"),
+        ]:
+            value = status.get(key)
+            self._publish(f"{self.options.base_topic}/{path}", "" if value is None else str(value))
+        if "box_dect" in status:
+            self._publish(f"{self.options.base_topic}/box/dect", "ON" if status.get("box_dect") else "OFF")
+
     def _publish_wan_discovery(self) -> None:
         sensors = [
             ("wan_downstream_max_mbit", "Verbindung Download", "wan/downstream_max_mbit", "Mbit/s", "mdi:download-network"),
@@ -967,15 +1129,17 @@ def run() -> None:
             present_phonebooks = {phonebook.phonebook_id for phonebook in phonebooks}
             wan = fritz.get_wan_common()
             last_wan_totals = apply_wan_rate_fallback(wan, last_wan_totals, poll_started)
-            publisher.publish_discovery(present_tam, present_wlan, call_views, present_phonebooks, all_phonebooks)
-            publisher.publish_states(tam_infos, wlan_infos, wan, calls, call_views, phonebooks, all_phonebooks)
+            box_status, dect_lines = fritz.get_box_status(options.include_dect_lines, options.max_dect_lines)
+            publisher.publish_discovery(present_tam, present_wlan, call_views, present_phonebooks, all_phonebooks, dect_lines)
+            publisher.publish_states(tam_infos, wlan_infos, wan, calls, call_views, phonebooks, all_phonebooks, box_status, dect_lines)
             LOG.info(
-                "Published %s answering machines, %s WLAN services, %s call views, %s selected phonebooks, %s listed phonebooks and WAN state",
+                "Published %s answering machines, %s WLAN services, %s call views, %s selected phonebooks, %s listed phonebooks, %s DECT lines and WAN state",
                 len(tam_infos),
                 len(wlan_infos),
                 len(call_views),
                 len(phonebooks),
                 len(all_phonebooks),
+                len(dect_lines),
             )
             stop_event.wait(options.poll_interval)
     finally:
@@ -1024,6 +1188,8 @@ def load_options() -> Options:
         call_monitor_port=int(raw.get("call_monitor_port", 1012)),
         max_calls=max(1, min(100, int(raw.get("max_calls", 20)))),
         max_live_events=max(1, min(100, int(raw.get("max_live_events", 20)))),
+        include_dect_lines=bool(raw.get("include_dect_lines", False)),
+        max_dect_lines=max(1, min(10, int(raw.get("max_dect_lines", 6)))),
         retain=bool(raw.get("retain", True)),
     )
 
@@ -1252,6 +1418,14 @@ def safe_object_part(value: str) -> str:
 def first_text(element: ET.Element, names: list[str]) -> str:
     for name in names:
         value = find_text(element, name).strip()
+        if value:
+            return value
+    return ""
+
+
+def first_value(values: dict[str, Any], names: list[str]) -> str:
+    for name in names:
+        value = str(values.get(name, "")).strip()
         if value:
             return value
     return ""
