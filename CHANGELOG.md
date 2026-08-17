@@ -14,9 +14,9 @@
 
 ## 0.1.26
 
-- Renamed the visible add-on and Home Assistant device to `FRITZ!Box to MQTT`.
+- Renamed the visible app and Home Assistant device to `FRITZ!Box to MQTT`.
 - Switched the default MQTT base topic to `fritzbox`.
 
 ## 0.1.0
 
-- Initial FRITZ!Box MQTT Discovery add-on.
+- Initial FRITZ!Box MQTT Discovery app.

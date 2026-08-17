@@ -1,13 +1,13 @@
 # FRITZ!Box to MQTT
 
-Home Assistant add-on repository for publishing FRITZ!Box data to Home Assistant through MQTT Discovery.
+Home Assistant app repository for publishing FRITZ!Box data to Home Assistant through MQTT Discovery.
 
-The add-on combines FRITZ!Box TR-064 calls, FRITZ!Box web/Lua fallbacks and the live call monitor on port `1012`. It creates MQTT Discovery entities for answering machines, WLAN switches, WAN state, call lists, phonebooks, live call events and optional DECT handset details.
+The app combines FRITZ!Box TR-064 calls, FRITZ!Box web/Lua fallbacks and the live call monitor on port `1012`. It creates MQTT Discovery entities for answering machines, WLAN switches, WAN state, call lists, phonebooks, live call events and optional DECT handset details.
 
 ## Installation
 
 1. Open Home Assistant.
-2. Go to **Settings > Add-ons > Add-on Store**.
+2. Go to **Settings > Apps > App-Store**.
 3. Open the three-dot menu and choose **Repositories**.
 4. Add this repository URL:
 
@@ -17,13 +17,13 @@ The add-on combines FRITZ!Box TR-064 calls, FRITZ!Box web/Lua fallbacks and the 
 
 5. Install **FRITZ!Box to MQTT**.
 6. Configure the FRITZ!Box IP address, port, user and password.
-7. Start the add-on.
+7. Start the app.
 
-The MQTT broker is discovered through the Home Assistant add-on service API when the Mosquitto broker add-on is available.
+The MQTT broker is discovered through the Home Assistant app service API when the Mosquitto broker app is available.
 
 ## HACS
 
-This project is a Home Assistant Supervisor add-on, not a HACS custom integration or frontend card. HACS does not install Docker-based Supervisor add-ons. Use the Home Assistant Add-on Store repository flow above.
+This project is a Home Assistant Supervisor app, not a HACS custom integration or frontend card. HACS does not install Docker-based Supervisor apps. Use the Home Assistant App-Store repository flow above.
 
 ## Features
 
@@ -37,9 +37,9 @@ This project is a Home Assistant Supervisor add-on, not a HACS custom integratio
 - Phonebook sensors and selectable phonebook display.
 - Optional DECT handset `intern` and `device` sensors with FRITZ!Box handset names.
 
-## Add-on
+## App
 
-The add-on lives in [`fritzbox_tr064_tam`](./fritzbox_tr064_tam). The folder and some unique IDs intentionally keep the original internal name for upgrade compatibility.
+The app lives in [`fritzbox_tr064_tam`](./fritzbox_tr064_tam). The folder and some unique IDs intentionally keep the original internal name for upgrade compatibility.
 
 ## License
 

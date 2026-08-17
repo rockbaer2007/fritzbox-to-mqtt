@@ -1,6 +1,6 @@
 # FRITZ!Box to MQTT
 
-Home Assistant add-on for reading FRITZ!Box data and live call events and publishing the result through MQTT Discovery.
+Home Assistant app for reading FRITZ!Box data and live call events and publishing the result through MQTT Discovery.
 
 It creates entities for detected answering machines only. The entity names use `AB0` to `AB4`; the FRITZ!Box answering machine name is exposed only as an attribute.
 
@@ -29,7 +29,7 @@ WAN entities:
 - `Box DECT`
 - `Box DNS over TLS`
 
-Current upload/download rates use TR-064 WAN data. If the FRITZ!Box does not expose direct rate values, the add-on calculates them from total byte counters between polls.
+Current upload/download rates use TR-064 WAN data. If the FRITZ!Box does not expose direct rate values, the app calculates them from total byte counters between polls.
 WAN PPP/IP control URLs are discovered from the FRITZ!Box service descriptions so different FRITZ!Box models can expose different paths.
 Control names from the service descriptions are normalized automatically, for example `wanpppconn1` can be called through `/upnp/control/wanpppconn1` or `/wanpppconn1` depending on the model.
 IPv6 additionally uses the FHEM-style `X_AVM_DE_GetExternalIPv6Address` action and `X_AVM-DE_AppSetup.GetAppRemoteInfo` as fallbacks.
@@ -47,7 +47,7 @@ Optional DECT line entities, if `include_dect_lines` is true:
 The displayed DECT entity names use the FRITZ!Box handset name. `DECT0`, `DECT1`, and so on are only used as a fallback when the FRITZ!Box does not return a name.
 `intern` and `device` publish numeric values only.
 DECT details are read by combining `GetGenericDectEntry`, `GetDECTHandsetInfo`, the DECT list XML, VoIP clients, and the FritzSmart-style `telcfg:settings/Foncontrol/User/list(...)` Lua query to find internal handset numbers such as `600`.
-If no internal number is exposed directly, the add-on falls back from the DECT device ID to the usual FRITZ!Box range (`1` -> `600`, `2` -> `601`).
+If no internal number is exposed directly, the app falls back from the DECT device ID to the usual FRITZ!Box range (`1` -> `600`, `2` -> `601`).
 
 Call list entities, depending on `call_lists`:
 
@@ -97,10 +97,10 @@ The SSID is exposed as an attribute and is not used as the entity name.
 
 - TR-064 enabled on the FRITZ!Box.
 - A FRITZ!Box user with sufficient rights for telephony/TAM and network status.
-- MQTT broker installed as Home Assistant add-on/app.
+- MQTT broker installed as Home Assistant app.
 - MQTT integration with discovery enabled in Home Assistant.
 
-## Add-on Configuration
+## App Configuration
 
 The visible configuration mask contains only:
 
@@ -131,4 +131,4 @@ The default maps phonebook `3` to `tellows Sperrliste 7` and phonebook `4` to `t
 `dns_over_tls_enabled` is only the fallback value for `Box DNS over TLS` when `query.lua` does not return `dnscfg:settings/dns_over_tls_enabled`.
 Mesh role uses TR-064 mesh XML first and falls back to the FHEM-style `data.lua?page=wlanmesh` query.
 If no mesh role source returns a value, `Box Mesh Rolle` publishes the FHEM default `master`.
-`log_value_details` writes the relevant raw TR-064 response dictionaries and normalized publish values to the add-on log. Set it to `false` after troubleshooting if the log should be quieter.
+`log_value_details` writes the relevant raw TR-064 response dictionaries and normalized publish values to the app log. Set it to `false` after troubleshooting if the log should be quieter.
