@@ -719,6 +719,12 @@ class HomeAssistantMqttPublisher:
 def run() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
     options = load_options()
+    LOG.info(
+        "Using MQTT broker %s:%s as user '%s'",
+        options.mqtt_host,
+        options.mqtt_port,
+        options.mqtt_username or "<none>",
+    )
     stop_event = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_args: stop_event.set())
     signal.signal(signal.SIGINT, lambda *_args: stop_event.set())
