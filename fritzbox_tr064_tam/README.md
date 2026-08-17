@@ -30,6 +30,7 @@ WAN entities:
 - `Box DNS over TLS`
 
 Current upload/download rates use TR-064 WAN data. If the FRITZ!Box does not expose direct rate values, the add-on calculates them from total byte counters between polls.
+WAN PPP/IP control URLs are discovered from the FRITZ!Box service descriptions so different FRITZ!Box models can expose different paths.
 `Box Mesh Rolle`, `Box PPP Verbindung`, `Box PPP IPv4 Extern`, and `Box IPv6 Extern` are text sensors and publish `unknown` when the FRITZ!Box does not expose a value.
 `Box DNS over TLS` is a binary sensor. It remains unavailable/unknown when the FRITZ!Box does not expose this setting through the queried interfaces.
 
@@ -42,6 +43,7 @@ Optional DECT line entities, if `include_dect_lines` is true:
 
 The displayed DECT entity names use the FRITZ!Box handset name. `DECT0`, `DECT1`, and so on are only used as a fallback when the FRITZ!Box does not return a name.
 `intern` and `device` publish numeric values only. `NoRingTime` uses the time-range value and ignores `NoRingTimeFlags`.
+DECT details are read by combining `GetGenericDectEntry` and `GetDECTHandsetInfo` when the FRITZ!Box supports both.
 
 Call list entities, depending on `call_lists`:
 

@@ -164,6 +164,17 @@ def wlan_index_from_slug(value: str) -> int | None:
     return None
 
 
+def unique_values(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if text and text not in seen:
+            result.append(text)
+            seen.add(text)
+    return result
+
+
 class FritzBoxTr064Client:
     def __init__(self, options: Options) -> None:
         scheme = "https" if options.fritz_ssl else "http"
@@ -172,6 +183,7 @@ class FritzBoxTr064Client:
         self.session = requests.Session()
         self.session.auth = HTTPDigestAuth(options.fritz_username, options.fritz_password)
         self.session.verify = False
+        self._service_control_urls: dict[str, list[str]] | None = None
 
     def get_tam_info(self, index: int) -> TamInfo:
         info = self._soap("/upnp/control/x_tam", TAM_SERVICE, "GetInfo", {"NewIndex": index})
@@ -291,11 +303,22 @@ class FritzBoxTr064Client:
             self._log_value_error("Box DeviceInfo GetInfo", exc)
             LOG.debug("Could not read mesh role: %s", exc)
 
-        self._read_wan_connection_status(result, WAN_PPP_SERVICE, "/upnp/control/wanpppconn1")
+        for control_url in self._control_urls_for_service(WAN_PPP_SERVICE, [
+            "/upnp/control/wanpppconn1",
+            "/igdupnp/control/WANPPPConn1",
+        ]):
+            self._read_wan_connection_status(result, WAN_PPP_SERVICE, control_url)
+            if result.get("box_ppp_connect") and result.get("ipv4_extern"):
+                break
         if not result.get("box_ppp_connect") or not result.get("ipv4_extern"):
-            self._read_wan_connection_status(result, WAN_IP_SERVICE, "/upnp/control/wanipconn1")
-        if not result.get("box_ppp_connect") or not result.get("ipv4_extern"):
-            self._read_wan_connection_status(result, WAN_IP_SERVICE, "/upnp/control/wanipconnection1")
+            for control_url in self._control_urls_for_service(WAN_IP_SERVICE, [
+                "/upnp/control/wanipconn1",
+                "/upnp/control/wanipconnection1",
+                "/igdupnp/control/WANIPConn1",
+            ]):
+                self._read_wan_connection_status(result, WAN_IP_SERVICE, control_url)
+                if result.get("box_ppp_connect") and result.get("ipv4_extern"):
+                    break
 
         try:
             dect = self._soap("/upnp/control/x_dect", DECT_SERVICE, "GetNumberOfDectEntries", {})
@@ -358,34 +381,45 @@ class FritzBoxTr064Client:
             LOG.debug("Could not read external IPv6 %s: %s", control_url, exc)
 
     def _get_dect_line(self, index: int) -> DectLineInfo | None:
-        for action, argument_name in [
-            ("GetGenericDectEntry", "NewIndex"),
-            ("GetDECTHandsetInfo", "NewDectID"),
-        ]:
+        values: dict[str, Any] = {}
+        try:
+            generic = self._soap("/upnp/control/x_dect", DECT_SERVICE, "GetGenericDectEntry", {"NewIndex": index})
+            self._log_values(f"DECT{index} GetGenericDectEntry", generic)
+            values.update(generic)
+        except Exception as exc:
+            self._log_value_error(f"DECT{index} GetGenericDectEntry", exc)
+            LOG.debug("Could not read DECT line %s with GetGenericDectEntry: %s", index, exc)
+
+        device = number_value(values, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"]) or str(index)
+        for dect_id in unique_values([device, str(index)]):
             try:
-                info = self._soap("/upnp/control/x_dect", DECT_SERVICE, action, {argument_name: index})
-                self._log_values(f"DECT{index} {action}", info)
-                internal = number_value(info, ["NewIntern", "NewInternalNumber", "NewHandsetNumber"])
-                device = number_value(info, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"])
-                no_ring_time = no_ring_time_value(info, [
-                    "NewNoRingTime",
-                    "NewNoRingTimeTime",
-                    "NewNoRingTimeRange",
-                    "NewX_AVM-DE_NoRingTime",
-                    "NewX_AVM_DE_NoRingTime",
-                ])
-                name = first_value(info, ["NewName", "NewHandsetName", "NewModel"])
-                return DectLineInfo(
-                    index=index,
-                    internal_number=internal,
-                    device_number=device,
-                    no_ring_time=no_ring_time,
-                    name=name,
-                )
+                handset = self._soap("/upnp/control/x_dect", DECT_SERVICE, "GetDECTHandsetInfo", {"NewDectID": dect_id})
+                self._log_values(f"DECT{index} GetDECTHandsetInfo id={dect_id}", handset)
+                values.update({key: value for key, value in handset.items() if str(value).strip()})
+                break
             except Exception as exc:
-                self._log_value_error(f"DECT{index} {action}", exc)
-                LOG.debug("Could not read DECT line %s with %s: %s", index, action, exc)
-        return None
+                self._log_value_error(f"DECT{index} GetDECTHandsetInfo id={dect_id}", exc)
+                LOG.debug("Could not read DECT line %s with GetDECTHandsetInfo id=%s: %s", index, dect_id, exc)
+
+        if not values:
+            return None
+        internal = number_value(values, ["NewIntern", "NewInternalNumber", "NewHandsetNumber"])
+        device = number_value(values, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"])
+        no_ring_time = no_ring_time_value(values, [
+            "NewNoRingTime",
+            "NewNoRingTimeTime",
+            "NewNoRingTimeRange",
+            "NewX_AVM-DE_NoRingTime",
+            "NewX_AVM_DE_NoRingTime",
+        ])
+        name = first_value(values, ["NewName", "NewHandsetName", "NewModel"])
+        return DectLineInfo(
+            index=index,
+            internal_number=internal,
+            device_number=device,
+            no_ring_time=no_ring_time,
+            name=name,
+        )
 
     def _log_values(self, label: str, values: dict[str, Any]) -> None:
         if self.options.log_value_details:
@@ -394,6 +428,40 @@ class FritzBoxTr064Client:
     def _log_value_error(self, label: str, exc: Exception) -> None:
         if self.options.log_value_details:
             LOG.info("%s failed: %s", label, exc)
+
+    def _control_urls_for_service(self, service_type: str, fallbacks: list[str]) -> list[str]:
+        all_urls = self._discover_control_urls()
+        discovered = list(all_urls.get(service_type, []))
+        service_family = service_type.rsplit(":", 1)[0]
+        for discovered_type, control_urls in all_urls.items():
+            if discovered_type != service_type and discovered_type.rsplit(":", 1)[0] == service_family:
+                discovered.extend(control_urls)
+        return unique_values(discovered + fallbacks)
+
+    def _discover_control_urls(self) -> dict[str, list[str]]:
+        if self._service_control_urls is not None:
+            return self._service_control_urls
+        urls: dict[str, list[str]] = {}
+        for description_url in ["/igddesc.xml", "/tr64desc.xml"]:
+            try:
+                root = self._get_xml_url(description_url)
+            except Exception as exc:
+                self._log_value_error(f"Service description {description_url}", exc)
+                continue
+            for service in root.iter():
+                if service.tag.split("}")[-1] != "service":
+                    continue
+                service_type = find_text(service, "serviceType").strip()
+                control_url = find_text(service, "controlURL").strip()
+                if service_type and control_url:
+                    urls.setdefault(service_type, []).append(control_url)
+        self._service_control_urls = {key: unique_values(value) for key, value in urls.items()}
+        if self.options.log_value_details:
+            LOG.info(
+                "Discovered control URLs: %s",
+                json.dumps(self._service_control_urls, ensure_ascii=False, sort_keys=True),
+            )
+        return self._service_control_urls
 
     def get_call_entries(self) -> list[CallEntry]:
         result = self._soap("/upnp/control/x_contact", ONTEL_SERVICE, "GetCallList", {})
