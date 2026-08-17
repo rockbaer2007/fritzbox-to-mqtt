@@ -334,6 +334,7 @@ class FritzBoxTr064Client:
             self._log_value_error("Box DeviceInfo GetInfo", exc)
             LOG.debug("Could not read mesh role: %s", exc)
         self._read_mesh_role(result)
+        self._read_fritzsmart_query_values(result)
 
         for control_url in self._control_urls_for_service(WAN_PPP_SERVICE, [
             "/upnp/control/wanpppconn1",
@@ -366,7 +367,9 @@ class FritzBoxTr064Client:
             self._log_value_error("DECT GetNumberOfDectEntries", exc)
             LOG.debug("Could not read DECT info: %s", exc)
 
-        if self.options.dns_over_tls_enabled:
+        if "box_dns_over_tls" in result:
+            pass
+        elif self.options.dns_over_tls_enabled:
             result["box_dns_over_tls"] = True
         else:
             result.setdefault("box_dns_over_tls", None)
@@ -471,6 +474,9 @@ class FritzBoxTr064Client:
             result["box_meshRole"] = "slave" if as_bool(is_repeater) else "master"
 
     def _read_ipv6_fallbacks(self, result: dict[str, Any]) -> None:
+        self._read_fritzsmart_query_values(result)
+        if result.get("ipv6_extern"):
+            return
         try:
             remote = self._soap("/upnp/control/x_remote", REMOTE_SERVICE, "GetDDNSInfo", {})
             self._log_values("RemoteAccess GetDDNSInfo", remote)
@@ -505,6 +511,29 @@ class FritzBoxTr064Client:
                     return
         except Exception as exc:
             self._log_value_error("MyFritz IPv6 fallback", exc)
+
+    def _read_fritzsmart_query_values(self, result: dict[str, Any]) -> None:
+        needs_ipv6 = not result.get("ipv6_extern")
+        needs_dns = "box_dns_over_tls" not in result
+        if not needs_ipv6 and not needs_dns:
+            return
+        query: dict[str, str] = {}
+        if needs_dns:
+            query["box_DNS_over_TLS"] = "dnscfg:settings/dns_over_tls_enabled"
+        if needs_ipv6:
+            query["box_IPv6_Extern"] = "ipv6:settings/ip"
+        try:
+            values = self._lua_query(query)
+            self._log_values("Lua query FritzSmart box values", values)
+        except Exception as exc:
+            self._log_value_error("Lua query FritzSmart box values", exc)
+            return
+        dns_value = values.get("box_DNS_over_TLS")
+        if needs_dns and dns_value is not None and str(dns_value).strip() != "":
+            result["box_dns_over_tls"] = as_bool(dns_value)
+        ipv6 = first_ipv6_value(values, ["box_IPv6_Extern"])
+        if needs_ipv6 and ipv6:
+            result["ipv6_extern"] = ipv6
 
     def _get_dect_line(self, index: int) -> DectLineInfo | None:
         values: dict[str, Any] = {}
@@ -601,6 +630,13 @@ class FritzBoxTr064Client:
         query = dict(params)
         query["sid"] = sid
         response = self.session.get(urllib.parse.urljoin(self.base_url + "/", "data.lua"), params=query, timeout=15)
+        response.raise_for_status()
+        return response.json()
+
+    def _lua_query(self, query: dict[str, str]) -> dict[str, Any]:
+        sid = self._fritz_sid()
+        params = {"sid": sid, **query}
+        response = self.session.get(urllib.parse.urljoin(self.base_url + "/", "query.lua"), params=params, timeout=15)
         response.raise_for_status()
         return response.json()
 
