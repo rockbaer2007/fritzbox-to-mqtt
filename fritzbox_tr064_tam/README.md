@@ -48,6 +48,7 @@ Optional DECT line entities, if `include_dect_lines` is true:
 The displayed DECT entity names use the FRITZ!Box handset name. `DECT0`, `DECT1`, and so on are only used as a fallback when the FRITZ!Box does not return a name.
 `intern` and `device` publish numeric values only. `NoRingTime` uses the time-range value from the FritzSmart-style DECT user list, formats compact values like `22000745` as `22:00-07:45`, and ignores `NoRingTimeFlags`.
 DECT details are read by combining `GetGenericDectEntry`, `GetDECTHandsetInfo`, the DECT list XML, VoIP clients, and the FritzSmart-style `telcfg:settings/Foncontrol/User/list(...)` Lua query to find internal handset numbers such as `600` and ring-blocking times such as `Mo-So 22:00-07:45`.
+If the list query does not expose `NoRingTime`, the add-on also tries direct indexed `telcfg:settings/Foncontrol/User*/NoRingTime` values.
 If no internal number is exposed directly, the add-on falls back from the DECT device ID to the usual FRITZ!Box range (`1` -> `600`, `2` -> `601`).
 
 Call list entities, depending on `call_lists`:

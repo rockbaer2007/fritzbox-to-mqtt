@@ -572,6 +572,7 @@ class FritzBoxTr064Client:
         values.update(self._dect_list_values(index, device, values))
         values.update(self._voip_client_values(index, device, values))
         values.update(self._dect_user_values(index, device, values))
+        values.update(self._dect_user_index_values(index, values))
 
         if not values:
             return None
@@ -792,11 +793,46 @@ class FritzBoxTr064Client:
                 ),
             })
             self._log_values("Lua query dectUser", values)
-            self._dect_user_entries = dict_list(values.get("dectUser") or values)
+            self._dect_user_entries = dect_user_entries_from_lua(values.get("dectUser") or values)
         except Exception as exc:
             self._log_value_error("Lua query dectUser", exc)
             self._dect_user_entries = []
         return self._dect_user_entries
+
+    def _dect_user_index_values(self, index: int, current_values: dict[str, Any]) -> dict[str, str]:
+        query = {}
+        for candidate in unique_values([str(index), str(index + 1)]):
+            prefix = f"dectUser{candidate}"
+            base = f"telcfg:settings/Foncontrol/User{candidate}"
+            query[f"{prefix}_Intern"] = f"{base}/Intern"
+            query[f"{prefix}_NoRingTime"] = f"{base}/NoRingTime"
+            query[f"{prefix}_RingAllowed"] = f"{base}/RingAllowed"
+            query[f"{prefix}_Name"] = f"{base}/Name"
+        try:
+            values = self._lua_query(query)
+            self._log_values(f"Lua query DECT{index} indexed dectUser", values)
+        except Exception as exc:
+            self._log_value_error(f"Lua query DECT{index} indexed dectUser", exc)
+            return {}
+        current_name = first_value(current_values, ["NewName", "NewHandsetName", "NewModel"])
+        for candidate in unique_values([str(index), str(index + 1)]):
+            prefix = f"dectUser{candidate}"
+            indexed_name = first_value(values, [f"{prefix}_Name"])
+            if current_name and indexed_name and current_name != indexed_name:
+                continue
+            extracted = {
+                "NewIntern": number_value(values, [f"{prefix}_Intern"]),
+                "NewNoRingTime": format_lua_no_ring_time({
+                    "NoRingTime": values.get(f"{prefix}_NoRingTime", ""),
+                    "RingAllowed": values.get(f"{prefix}_RingAllowed", ""),
+                }),
+                "NewName": indexed_name,
+            }
+            extracted = {key: value for key, value in extracted.items() if value}
+            if extracted:
+                self._log_values(f"DECT{index} indexed dectUser match {candidate}", extracted)
+                return extracted
+        return {}
 
     def _control_urls_for_service(self, service_type: str, fallbacks: list[str]) -> list[str]:
         all_urls = self._discover_control_urls()
@@ -2102,6 +2138,11 @@ def first_value(values: dict[str, Any], names: list[str]) -> str:
         value = str(values.get(name, "")).strip()
         if value:
             return value
+    lower_values = {str(key).lower(): value for key, value in values.items()}
+    for name in names:
+        value = str(lower_values.get(name.lower(), "")).strip()
+        if value:
+            return value
     return ""
 
 
@@ -2138,25 +2179,44 @@ def dect_internal_from_device(device: str) -> str:
     return ""
 
 
-def dict_list(value: Any) -> list[dict[str, Any]]:
+def dect_user_entries_from_lua(value: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    collect_dect_user_entries(value, entries)
+    LOG.info("Lua dectUser normalized entries: %s", len(entries))
+    return entries
+
+
+def collect_dect_user_entries(value: Any, entries: list[dict[str, Any]]) -> None:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or text in {"[]", "{}"}:
+            return
+        try:
+            collect_dect_user_entries(json.loads(text), entries)
+        except json.JSONDecodeError:
+            return
+        return
     if isinstance(value, list):
-        return [entry for entry in value if isinstance(entry, dict)]
+        for entry in value:
+            collect_dect_user_entries(entry, entries)
+        return
     if isinstance(value, dict):
-        nested = [entry for entry in value.values() if isinstance(entry, dict)]
-        if nested:
-            return nested
-        return [value]
-    return []
+        lower_keys = {str(key).lower() for key in value}
+        if any(key.lower() in lower_keys for key in ["Intern", "NoRingTime", "RingAllowed", "NoRingTimeFlags"]):
+            entries.append(value)
+            return
+        for entry in value.values():
+            collect_dect_user_entries(entry, entries)
 
 
 def format_lua_no_ring_time(values: dict[str, Any]) -> str:
-    value = str(values.get("NoRingTime", "")).strip()
+    value = first_value(values, ["NoRingTime"])
     if not value:
         return ""
     value = normalize_no_ring_time(value)
     if re.search(r"[A-Za-z]", value):
         return value
-    day_prefix = ring_allowed_label(values.get("RingAllowed"))
+    day_prefix = ring_allowed_label(first_value(values, ["RingAllowed"]))
     return f"{day_prefix} {value}".strip()
 
 
