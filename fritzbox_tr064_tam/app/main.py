@@ -24,6 +24,9 @@ TAM_SERVICE = "urn:dslforum-org:service:X_AVM-DE_TAM:1"
 ONTEL_SERVICE = "urn:dslforum-org:service:X_AVM-DE_OnTel:1"
 VOIP_SERVICE = "urn:dslforum-org:service:X_VoIP:1"
 DEVICE_INFO_SERVICE = "urn:dslforum-org:service:DeviceInfo:1"
+HOSTS_SERVICE = "urn:dslforum-org:service:Hosts:1"
+REMOTE_SERVICE = "urn:dslforum-org:service:X_AVM-DE_RemoteAccess:1"
+MYFRITZ_SERVICE = "urn:dslforum-org:service:X_AVM-DE_MyFritz:1"
 WAN_COMMON_SERVICE = "urn:dslforum-org:service:WANCommonInterfaceConfig:1"
 WAN_IP_SERVICE = "urn:schemas-upnp-org:service:WANIPConnection:1"
 WAN_PPP_SERVICE = "urn:schemas-upnp-org:service:WANPPPConnection:1"
@@ -78,6 +81,7 @@ class Options:
     max_live_events: int
     include_dect_lines: bool
     max_dect_lines: int
+    dns_over_tls_enabled: bool
     log_value_details: bool
     retain: bool
 
@@ -327,6 +331,7 @@ class FritzBoxTr064Client:
         except Exception as exc:
             self._log_value_error("Box DeviceInfo GetInfo", exc)
             LOG.debug("Could not read mesh role: %s", exc)
+        self._read_mesh_role(result)
 
         for control_url in self._control_urls_for_service(WAN_PPP_SERVICE, [
             "/upnp/control/wanpppconn1",
@@ -359,7 +364,10 @@ class FritzBoxTr064Client:
             self._log_value_error("DECT GetNumberOfDectEntries", exc)
             LOG.debug("Could not read DECT info: %s", exc)
 
-        result.setdefault("box_dns_over_tls", None)
+        if self.options.dns_over_tls_enabled:
+            result["box_dns_over_tls"] = True
+        else:
+            result.setdefault("box_dns_over_tls", None)
         self._log_values("Box normalized status", result)
         return result, dect_lines
 
@@ -404,6 +412,54 @@ class FritzBoxTr064Client:
         except Exception as exc:
             self._log_value_error(f"WAN {control_url} GetInfo", exc)
             LOG.debug("Could not read external IPv6 %s: %s", control_url, exc)
+        if not result.get("ipv6_extern"):
+            self._read_ipv6_fallbacks(result)
+
+    def _read_mesh_role(self, result: dict[str, Any]) -> None:
+        if result.get("box_meshRole"):
+            return
+        try:
+            mesh_path = self._soap("/upnp/control/hosts", HOSTS_SERVICE, "X_AVM-DE_GetMeshListPath", {})
+            self._log_values("Hosts X_AVM-DE_GetMeshListPath", mesh_path)
+            path = first_value(mesh_path, ["NewX_AVM-DE_MeshListPath", "NewX_AVM_DE_MeshListPath"])
+            if not path:
+                return
+            root = self._get_xml_url(path)
+        except Exception as exc:
+            self._log_value_error("Hosts X_AVM-DE_GetMeshListPath", exc)
+            return
+        role = mesh_role_from_xml(root, self.options.fritz_host)
+        if role:
+            result["box_meshRole"] = role
+        elif list(root.iter()):
+            result["box_meshRole"] = "master"
+
+    def _read_ipv6_fallbacks(self, result: dict[str, Any]) -> None:
+        try:
+            remote = self._soap("/upnp/control/x_remote", REMOTE_SERVICE, "GetDDNSInfo", {})
+            self._log_values("RemoteAccess GetDDNSInfo", remote)
+            ipv6 = first_ipv6_value(remote, [
+                "NewServerIPv6",
+                "NewStatusIPv6",
+            ])
+            if ipv6:
+                result["ipv6_extern"] = ipv6
+                return
+        except Exception as exc:
+            self._log_value_error("RemoteAccess GetDDNSInfo", exc)
+        try:
+            count_result = self._soap("/upnp/control/x_myfritz", MYFRITZ_SERVICE, "GetNumberOfServices", {})
+            self._log_values("MyFritz GetNumberOfServices", count_result)
+            count = as_int(first_value(count_result, ["NewNumberOfServices"]))
+            for index in range(count):
+                service = self._soap("/upnp/control/x_myfritz", MYFRITZ_SERVICE, "GetServiceByIndex", {"NewIndex": index})
+                self._log_values(f"MyFritz GetServiceByIndex index={index}", service)
+                ipv6 = first_ipv6_value(service, ["NewIPv6Addresses", "NewIPv6Address", "NewIPv6InterfaceIDs"])
+                if ipv6:
+                    result["ipv6_extern"] = ipv6
+                    return
+        except Exception as exc:
+            self._log_value_error("MyFritz IPv6 fallback", exc)
 
     def _get_dect_line(self, index: int) -> DectLineInfo | None:
         values: dict[str, Any] = {}
@@ -1529,6 +1585,7 @@ def load_options() -> Options:
         max_live_events=max(1, min(100, int(raw.get("max_live_events", 20)))),
         include_dect_lines=bool(raw.get("include_dect_lines", False)),
         max_dect_lines=max(1, min(10, int(raw.get("max_dect_lines", 6)))),
+        dns_over_tls_enabled=bool(raw.get("dns_over_tls_enabled", True)),
         log_value_details=bool(raw.get("log_value_details", True)),
         retain=bool(raw.get("retain", True)),
     )
@@ -1694,6 +1751,71 @@ def phonebook_summary(phonebook: PhonebookInfo) -> dict[str, Any]:
         "name": phonebook.name,
         "contacts": len(phonebook.contacts),
     }
+
+
+def mesh_role_from_xml(root: ET.Element, fritz_host: str) -> str:
+    candidates: list[tuple[bool, str]] = []
+    for element in root.iter():
+        children = {child.tag.split("}")[-1].lower(): child.text or "" for child in element}
+        role = first_role_value(children)
+        if not role:
+            continue
+        text = ET.tostring(element, encoding="unicode")
+        is_self = bool(fritz_host and fritz_host in text) or any(
+            as_bool(children.get(name, ""))
+            for name in ["self", "this", "local", "islocal", "isthisdevice"]
+        )
+        candidates.append((is_self, role))
+    for is_self, role in candidates:
+        if is_self:
+            return role
+    return candidates[0][1] if candidates else ""
+
+
+def first_role_value(values: dict[str, str]) -> str:
+    for name, value in values.items():
+        lower_name = name.lower()
+        if "role" not in lower_name and "master" not in lower_name and "mesh" not in lower_name:
+            continue
+        role = normalize_mesh_role(value)
+        if role:
+            return role
+    return ""
+
+
+def normalize_mesh_role(value: Any) -> str:
+    text = str(value).strip().lower()
+    if not text:
+        return ""
+    if text in {"1", "true", "yes", "master", "mesh_master", "controller"}:
+        return "master"
+    if text in {"0", "false", "no", "slave", "repeater", "mesh_slave", "agent"}:
+        return "slave"
+    if "master" in text or "controller" in text:
+        return "master"
+    if "slave" in text or "repeater" in text or "agent" in text:
+        return "slave"
+    return text
+
+
+def first_ipv6_value(values: dict[str, Any], names: list[str]) -> str:
+    for name in names:
+        value = ipv6_from_text(str(values.get(name, "")))
+        if value:
+            return value
+    for value in values.values():
+        ipv6 = ipv6_from_text(str(value))
+        if ipv6:
+            return ipv6
+    return ""
+
+
+def ipv6_from_text(value: str) -> str:
+    for candidate in re.split(r"[\s,;]+", value.strip()):
+        text = candidate.strip("[](){}<>\"'")
+        if ":" in text and re.fullmatch(r"[0-9A-Fa-f:.%]+", text):
+            return text
+    return ""
 
 
 def call_to_dict(call: CallEntry) -> dict[str, str]:

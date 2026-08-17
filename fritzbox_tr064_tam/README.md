@@ -117,6 +117,7 @@ max_calls: 20
 max_live_events: 20
 include_dect_lines: false
 max_dect_lines: 6
+dns_over_tls_enabled: true
 log_value_details: true
 ```
 
@@ -125,4 +126,5 @@ MQTT host, port, username and password are requested from Home Assistant's inter
 `phonebook_names` can override generic FRITZ!Box names, for example `1:Privat,3:Firma`.
 The default maps phonebook `3` to `tellows Sperrliste 7` and phonebook `4` to `tellows Sperrliste 8-9`.
 `phonebook_name_excludes` hides matching FRITZ!Box phonebook names from the list, for example `tellows`.
+`dns_over_tls_enabled` publishes `Box DNS over TLS` as `ON`; the supplied TR-064 service list does not expose a readable DNS-over-TLS state.
 `log_value_details` writes the relevant raw TR-064 response dictionaries and normalized publish values to the add-on log. Set it to `false` after troubleshooting if the log should be quieter.

@@ -17,6 +17,7 @@ max_calls: 20
 max_live_events: 20
 include_dect_lines: false
 max_dect_lines: 6
+dns_over_tls_enabled: true
 log_value_details: true
 ```
 
@@ -24,6 +25,7 @@ The visible Home Assistant add-on configuration asks for the FRITZ!Box connectio
 MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.
 MQTT discovery uses the prefix `homeassistant`, base topic `fritzbox/tr064`, polling every 60 seconds, up to five answering machines and up to four WLAN services.
 If `log_value_details` is true, the add-on logs the relevant raw TR-064 response dictionaries and the normalized values published to MQTT.
+`dns_over_tls_enabled` publishes `Box DNS over TLS` as `ON`; the supplied TR-064 service list does not expose a readable DNS-over-TLS state.
 Only readable FRITZ!Box features are published to Home Assistant; missing optional services are hidden in normal logs and skipped in discovery.
 Current WAN upload/download rates use TR-064. Port `1012` is only the live call monitor and does not provide bandwidth data.
 WAN PPP/IP control URLs are discovered from `/igddesc.xml` and `/tr64desc.xml`, with known paths used as fallbacks.
