@@ -32,6 +32,7 @@ WAN entities:
 Current upload/download rates use TR-064 WAN data. If the FRITZ!Box does not expose direct rate values, the add-on calculates them from total byte counters between polls.
 WAN PPP/IP control URLs are discovered from the FRITZ!Box service descriptions so different FRITZ!Box models can expose different paths.
 Control names from the service descriptions are normalized automatically, for example `wanpppconn1` can be called through `/upnp/control/wanpppconn1` or `/wanpppconn1` depending on the model.
+IPv6 additionally uses the FHEM-style `X_AVM_DE_GetExternalIPv6Address` action and `X_AVM-DE_AppSetup.GetAppRemoteInfo` as fallbacks.
 `Box Mesh Rolle`, `Box PPP Verbindung`, `Box PPP IPv4 Extern`, and `Box IPv6 Extern` are text sensors and publish `unknown` when the FRITZ!Box does not expose a value.
 `Box DNS over TLS` is a binary sensor. It remains unavailable/unknown when the FRITZ!Box does not expose this setting through the queried interfaces.
 
@@ -127,4 +128,5 @@ MQTT host, port, username and password are requested from Home Assistant's inter
 The default maps phonebook `3` to `tellows Sperrliste 7` and phonebook `4` to `tellows Sperrliste 8-9`.
 `phonebook_name_excludes` hides matching FRITZ!Box phonebook names from the list, for example `tellows`.
 `dns_over_tls_enabled` publishes `Box DNS over TLS` as `ON`; the supplied TR-064 service list does not expose a readable DNS-over-TLS state.
+Mesh role uses TR-064 mesh XML first and falls back to the FHEM-style `data.lua?page=wlanmesh` query.
 `log_value_details` writes the relevant raw TR-064 response dictionaries and normalized publish values to the add-on log. Set it to `false` after troubleshooting if the log should be quieter.

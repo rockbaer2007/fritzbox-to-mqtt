@@ -30,7 +30,9 @@ Only readable FRITZ!Box features are published to Home Assistant; missing option
 Current WAN upload/download rates use TR-064. Port `1012` is only the live call monitor and does not provide bandwidth data.
 WAN PPP/IP control URLs are discovered from `/igddesc.xml` and `/tr64desc.xml`, with known paths used as fallbacks.
 Control names are normalized automatically so FRITZ!Box descriptions that expose names such as `wanpppconn1` can still be called through the matching URL path.
+IPv6 additionally uses the FHEM-style `X_AVM_DE_GetExternalIPv6Address` action and `X_AVM-DE_AppSetup.GetAppRemoteInfo` as fallbacks.
 Additional box status sensors include text sensors for `box_meshRole`, `box_ppp_connect`, `ipv4_extern` (`Box PPP IPv4 Extern`), and `ipv6_extern` (`Box IPv6 Extern`), plus binary sensors for `box_dect` and `box_dns_over_tls` where the FRITZ!Box exposes them. Missing text values are published as `unknown`.
+Mesh role uses TR-064 mesh XML first and falls back to the FHEM-style `data.lua?page=wlanmesh` query.
 If `include_dect_lines` is true, the add-on also publishes `dect*_intern`, `dect*_device`, and `dect*_NoRingTime` sensors up to `max_dect_lines`. The Home Assistant sensor names use the FRITZ!Box handset name when available. `intern` and `device` publish numeric values only; `NoRingTime` ignores `NoRingTimeFlags`. DECT details combine `GetGenericDectEntry`, `GetDECTHandsetInfo`, the DECT list XML, and VoIP client data where available.
 
 `call_lists` is a comma-separated selection of:

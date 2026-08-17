@@ -11,6 +11,7 @@ import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from hashlib import md5
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -27,6 +28,7 @@ DEVICE_INFO_SERVICE = "urn:dslforum-org:service:DeviceInfo:1"
 HOSTS_SERVICE = "urn:dslforum-org:service:Hosts:1"
 REMOTE_SERVICE = "urn:dslforum-org:service:X_AVM-DE_RemoteAccess:1"
 MYFRITZ_SERVICE = "urn:dslforum-org:service:X_AVM-DE_MyFritz:1"
+APP_SETUP_SERVICE = "urn:dslforum-org:service:X_AVM-DE_AppSetup:1"
 WAN_COMMON_SERVICE = "urn:dslforum-org:service:WANCommonInterfaceConfig:1"
 WAN_IP_SERVICE = "urn:schemas-upnp-org:service:WANIPConnection:1"
 WAN_PPP_SERVICE = "urn:schemas-upnp-org:service:WANPPPConnection:1"
@@ -412,6 +414,15 @@ class FritzBoxTr064Client:
         except Exception as exc:
             self._log_value_error(f"WAN {control_url} GetInfo", exc)
             LOG.debug("Could not read external IPv6 %s: %s", control_url, exc)
+        if not result.get("ipv6_extern") and service.rsplit(":", 1)[0] == WAN_IP_SERVICE.rsplit(":", 1)[0]:
+            try:
+                avm_ipv6 = self._soap(control_url, service, "X_AVM_DE_GetExternalIPv6Address", {})
+                self._log_values(f"WAN {control_url} X_AVM_DE_GetExternalIPv6Address", avm_ipv6)
+                ipv6 = first_ipv6_value(avm_ipv6, ["NewExternalIPv6Address"])
+                if ipv6:
+                    result["ipv6_extern"] = ipv6
+            except Exception as exc:
+                self._log_value_error(f"WAN {control_url} X_AVM_DE_GetExternalIPv6Address", exc)
         if not result.get("ipv6_extern"):
             self._read_ipv6_fallbacks(result)
 
@@ -423,16 +434,41 @@ class FritzBoxTr064Client:
             self._log_values("Hosts X_AVM-DE_GetMeshListPath", mesh_path)
             path = first_value(mesh_path, ["NewX_AVM-DE_MeshListPath", "NewX_AVM_DE_MeshListPath"])
             if not path:
+                self._read_mesh_role_lua(result)
                 return
             root = self._get_xml_url(path)
         except Exception as exc:
             self._log_value_error("Hosts X_AVM-DE_GetMeshListPath", exc)
+            self._read_mesh_role_lua(result)
             return
         role = mesh_role_from_xml(root, self.options.fritz_host)
         if role:
             result["box_meshRole"] = role
         elif list(root.iter()):
             result["box_meshRole"] = "master"
+        if not result.get("box_meshRole"):
+            self._read_mesh_role_lua(result)
+
+    def _read_mesh_role_lua(self, result: dict[str, Any]) -> None:
+        try:
+            data = self._lua_data({"xhr": "1", "lang": "de", "page": "wlanmesh", "xhrId": "all"})
+            self._log_values("Lua data wlanmesh", data)
+        except Exception as exc:
+            self._log_value_error("Lua data wlanmesh", exc)
+            return
+        role = first_nested_value(data, [
+            ["data", "vars", "role", "value"],
+            ["vars", "role", "value"],
+        ])
+        if role:
+            result["box_meshRole"] = normalize_mesh_role(role)
+            return
+        is_repeater = first_nested_value(data, [
+            ["data", "rep_data", "is_repeater"],
+            ["rep_data", "is_repeater"],
+        ])
+        if is_repeater != "":
+            result["box_meshRole"] = "slave" if as_bool(is_repeater) else "master"
 
     def _read_ipv6_fallbacks(self, result: dict[str, Any]) -> None:
         try:
@@ -447,6 +483,15 @@ class FritzBoxTr064Client:
                 return
         except Exception as exc:
             self._log_value_error("RemoteAccess GetDDNSInfo", exc)
+        try:
+            app = self._soap("/upnp/control/x_appsetup", APP_SETUP_SERVICE, "GetAppRemoteInfo", {})
+            self._log_values("AppSetup GetAppRemoteInfo", app)
+            ipv6 = first_ipv6_value(app, ["NewExternalIPv6Address"])
+            if ipv6:
+                result["ipv6_extern"] = ipv6
+                return
+        except Exception as exc:
+            self._log_value_error("AppSetup GetAppRemoteInfo", exc)
         try:
             count_result = self._soap("/upnp/control/x_myfritz", MYFRITZ_SERVICE, "GetNumberOfServices", {})
             self._log_values("MyFritz GetNumberOfServices", count_result)
@@ -550,6 +595,42 @@ class FritzBoxTr064Client:
         else:
             candidates = ["/upnp/control/" + text, "/" + text]
         return [urllib.parse.urljoin(self.base_url + "/", candidate.lstrip("/")) for candidate in unique_values(candidates)]
+
+    def _lua_data(self, params: dict[str, str]) -> dict[str, Any]:
+        sid = self._fritz_sid()
+        query = dict(params)
+        query["sid"] = sid
+        response = self.session.get(urllib.parse.urljoin(self.base_url + "/", "data.lua"), params=query, timeout=15)
+        response.raise_for_status()
+        return response.json()
+
+    def _fritz_sid(self) -> str:
+        response = self.session.get(urllib.parse.urljoin(self.base_url + "/", "login_sid.lua?version=2"), timeout=15)
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
+        sid = find_text(root, "SID").strip()
+        if sid and sid != "0000000000000000":
+            return sid
+        challenge = find_text(root, "Challenge").strip()
+        if not challenge:
+            raise RuntimeError("FRITZ!Box login challenge missing")
+        password = self.options.fritz_password
+        digest = md5(f"{challenge}-{password}".encode("utf-16le")).hexdigest()
+        login = self.session.get(
+            urllib.parse.urljoin(self.base_url + "/", "login_sid.lua"),
+            params={
+                "version": "2",
+                "username": self.options.fritz_username,
+                "response": f"{challenge}-{digest}",
+            },
+            timeout=15,
+        )
+        login.raise_for_status()
+        login_root = ET.fromstring(login.content)
+        sid = find_text(login_root, "SID").strip()
+        if not sid or sid == "0000000000000000":
+            raise RuntimeError("FRITZ!Box SID login failed")
+        return sid
 
     def _dect_list_values(self, index: int, device: str, values: dict[str, Any]) -> dict[str, str]:
         try:
@@ -1807,6 +1888,21 @@ def first_ipv6_value(values: dict[str, Any], names: list[str]) -> str:
         ipv6 = ipv6_from_text(str(value))
         if ipv6:
             return ipv6
+    return ""
+
+
+def first_nested_value(values: dict[str, Any], paths: list[list[str]]) -> str:
+    for path in paths:
+        current: Any = values
+        for part in path:
+            if not isinstance(current, dict) or part not in current:
+                current = None
+                break
+            current = current[part]
+        if current is not None:
+            text = str(current).strip()
+            if text:
+                return text
     return ""
 
 
