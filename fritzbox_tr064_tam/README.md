@@ -35,9 +35,12 @@ Current upload/download rates use TR-064 WAN data. If the FRITZ!Box does not exp
 
 Optional DECT line entities, if `include_dect_lines` is true:
 
-- `DECT0 intern`
-- `DECT1 intern`
+- `{DECT name} intern`
+- `{DECT name} device`
+- `{DECT name} NoRingTime`
 - further detected DECT lines
+
+The displayed DECT entity names use the FRITZ!Box handset name. `DECT0`, `DECT1`, and so on are only used as a fallback when the FRITZ!Box does not return a name.
 
 Call list entities, depending on `call_lists`:
 

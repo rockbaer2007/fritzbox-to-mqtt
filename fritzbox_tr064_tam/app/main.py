@@ -123,7 +123,13 @@ class PhonebookInfo:
 class DectLineInfo:
     index: int
     internal_number: str
+    device_number: str
+    no_ring_time: str
     name: str
+
+    @property
+    def display_name(self) -> str:
+        return self.name or f"DECT{self.index}"
 
 
 @dataclass(frozen=True)
@@ -338,8 +344,22 @@ class FritzBoxTr064Client:
             try:
                 info = self._soap("/upnp/control/x_dect", DECT_SERVICE, action, {argument_name: index})
                 internal = first_value(info, ["NewIntern", "NewInternalNumber", "NewHandsetNumber", "NewID"])
+                device = first_value(info, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"])
+                no_ring_time = first_value(info, [
+                    "NewNoRingTime",
+                    "NewNoRingTimeTime",
+                    "NewNoRingTimeRange",
+                    "NewX_AVM-DE_NoRingTime",
+                    "NewX_AVM_DE_NoRingTime",
+                ])
                 name = first_value(info, ["NewName", "NewHandsetName", "NewModel"])
-                return DectLineInfo(index=index, internal_number=internal or str(index), name=name)
+                return DectLineInfo(
+                    index=index,
+                    internal_number=internal or str(index),
+                    device_number=device or str(index),
+                    no_ring_time=no_ring_time,
+                    name=name,
+                )
             except Exception as exc:
                 LOG.debug("Could not read DECT line %s with %s: %s", index, action, exc)
         return None
@@ -609,10 +629,15 @@ class HomeAssistantMqttPublisher:
             for line in dect_lines:
                 prefix = f"{self.options.base_topic}/dect/{line.index}"
                 self._publish(f"{prefix}/intern", line.internal_number)
+                self._publish(f"{prefix}/device", line.device_number)
+                self._publish(f"{prefix}/NoRingTime", line.no_ring_time)
                 self._publish_json(f"{prefix}/attributes", {
                     "dect_index": line.index,
                     "name": line.name,
+                    "display_name": line.display_name,
                     "internal_number": line.internal_number,
+                    "device_number": line.device_number,
+                    "no_ring_time": line.no_ring_time,
                 })
 
     def publish_call_monitor_state(self, event: CallMonitorEvent | None = None) -> None:
@@ -966,21 +991,45 @@ class HomeAssistantMqttPublisher:
 
     def _publish_dect_line_discovery(self, dect_lines: list[DectLineInfo]) -> None:
         present = {line.index for line in dect_lines}
+        lines_by_index = {line.index: line for line in dect_lines}
         for index in range(self.options.max_dect_lines):
             if index not in present:
-                self._publish(
-                    f"{self.options.discovery_prefix}/sensor/fritzbox_tr064/dect{index}_intern/config",
-                    "",
-                    retain=True,
-                )
+                for object_id in [
+                    f"dect{index}_intern",
+                    f"dect{index}_device",
+                    f"dect{index}_NoRingTime",
+                ]:
+                    self._publish(
+                        f"{self.options.discovery_prefix}/sensor/fritzbox_tr064/{object_id}/config",
+                        "",
+                        retain=True,
+                    )
                 continue
+            line = lines_by_index[index]
+            name = line.display_name
             prefix = f"{self.options.base_topic}/dect/{index}"
             self._publish_config("sensor", f"dect{index}_intern", {
-                "name": f"DECT{index} intern",
+                "name": f"{name} intern",
                 "unique_id": f"fritzbox_tr064_dect{index}_intern",
                 "state_topic": f"{prefix}/intern",
                 "json_attributes_topic": f"{prefix}/attributes",
                 "icon": "mdi:phone-classic",
+                "device": self._device(),
+            })
+            self._publish_config("sensor", f"dect{index}_device", {
+                "name": f"{name} device",
+                "unique_id": f"fritzbox_tr064_dect{index}_device",
+                "state_topic": f"{prefix}/device",
+                "json_attributes_topic": f"{prefix}/attributes",
+                "icon": "mdi:numeric",
+                "device": self._device(),
+            })
+            self._publish_config("sensor", f"dect{index}_NoRingTime", {
+                "name": f"{name} NoRingTime",
+                "unique_id": f"fritzbox_tr064_dect{index}_NoRingTime",
+                "state_topic": f"{prefix}/NoRingTime",
+                "json_attributes_topic": f"{prefix}/attributes",
+                "icon": "mdi:phone-clock",
                 "device": self._device(),
             })
 
