@@ -9,7 +9,10 @@ user: homeassistant
 password: secret
 call_lists: all,incoming,outgoing,missed
 phonebooks: all
+phonebook_names: ""
 phonebook_name_excludes: tellows
+call_monitor_enabled: true
+call_monitor_port: 1012
 max_calls: 20
 ```
 
@@ -28,8 +31,11 @@ Only readable FRITZ!Box features are published to Home Assistant; missing option
 `phonebooks` can be `all` or a comma-separated list of FRITZ!Box phonebook IDs, for example `0,1`.
 It is only the startup selection. After the first successful scan, the `Telefonbücher` sensor lists all detected phonebooks and the `Telefonbuch Anzeige` select entity can switch between `Alle Telefonbücher` and individual phonebooks.
 For several selected phonebooks at once, use the `Telefonbücher Auswahl` text entity with comma-separated IDs or names, for example `0,2` or `Privat,Firma`.
+`phonebook_names` can override generic FRITZ!Box names, for example `1:Privat,3:Firma`.
 `phonebook_name_excludes` is a comma-separated name filter; by default, phonebooks with `tellows` in the name are hidden from the list and from `Alle Telefonbücher`.
 `max_calls` limits how many calls are included in the sensor attributes. The sensor state still reports the total count for the selected list.
+
+If `call_monitor_enabled` is true, the add-on also connects to the FRITZ!Box call monitor on `call_monitor_port` and publishes live `RING`, `CALL`, `CONNECT`, and `DISCONNECT` events. The call monitor must be enabled on the FRITZ!Box, usually with `#96*5*` from a connected phone.
 
 The add-on probes answering machine indexes `0` to `max_tam - 1` and publishes discovery only for readable/present entries.
 It probes WLAN TR-064 services from `WLANConfiguration:1` to `WLANConfiguration:max_wlan` and publishes only services that answer successfully.

@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import signal
+import socket
 import threading
 import time
 import urllib.parse
@@ -59,7 +60,10 @@ class Options:
     max_wlan: int
     call_lists: str
     phonebooks: str
+    phonebook_names: str
     phonebook_name_excludes: str
+    call_monitor_enabled: bool
+    call_monitor_port: int
     max_calls: int
     retain: bool
 
@@ -101,6 +105,20 @@ class PhonebookInfo:
     phonebook_id: str
     name: str
     contacts: list[dict[str, str]]
+
+
+@dataclass(frozen=True)
+class CallMonitorEvent:
+    event: str
+    state: str
+    timestamp: str
+    connection_id: str
+    caller: str
+    called: str
+    extension: str
+    line: str
+    duration: str
+    raw: str
 
 
 def wlan_slug(index: int) -> str:
@@ -373,6 +391,7 @@ class HomeAssistantMqttPublisher:
             self._remove_phonebook_discovery(phonebook_id)
         self._publish_phonebook_overview_discovery()
         self._publish_phonebook_select_discovery(all_phonebooks)
+        self._publish_call_monitor_discovery()
         self._publish_wan_discovery()
         self.known_tam_indices = set(present_tam_indices)
         self.known_wlan_indices = set(present_wlan_indices)
@@ -451,6 +470,19 @@ class HomeAssistantMqttPublisher:
             self._publish(f"{self.options.base_topic}/wan/download_kbit_s", format_kbit_per_second(wan["byte_receive_rate"]))
         if "physical_link_status" in wan:
             self._publish(f"{self.options.base_topic}/wan/link_status", str(wan["physical_link_status"]))
+
+    def publish_call_monitor_state(self, event: CallMonitorEvent | None = None) -> None:
+        prefix = f"{self.options.base_topic}/call_monitor"
+        if event is None:
+            self._publish(f"{prefix}/status", "idle")
+            self._publish(f"{prefix}/ringing", "OFF")
+            self._publish(f"{prefix}/last_event", "")
+            self._publish_json(f"{prefix}/attributes", {"event": "idle"})
+            return
+        self._publish(f"{prefix}/status", event.state)
+        self._publish(f"{prefix}/ringing", "ON" if event.event == "RING" else "OFF")
+        self._publish(f"{prefix}/last_event", event.event)
+        self._publish_json(f"{prefix}/attributes", call_monitor_event_to_dict(event))
 
     def _on_connect(self, client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any) -> None:
         LOG.info("Connected to MQTT broker with result %s", reason_code)
@@ -704,6 +736,35 @@ class HomeAssistantMqttPublisher:
             "device": self._device(),
         })
 
+    def _publish_call_monitor_discovery(self) -> None:
+        prefix = f"{self.options.base_topic}/call_monitor"
+        self._publish_config("sensor", "call_monitor_status", {
+            "name": "Anrufmonitor Status",
+            "unique_id": "fritzbox_tr064_call_monitor_status",
+            "state_topic": f"{prefix}/status",
+            "json_attributes_topic": f"{prefix}/attributes",
+            "icon": "mdi:phone",
+            "device": self._device(),
+        })
+        self._publish_config("binary_sensor", "call_monitor_ringing", {
+            "name": "Telefon klingelt",
+            "unique_id": "fritzbox_tr064_call_monitor_ringing",
+            "state_topic": f"{prefix}/ringing",
+            "json_attributes_topic": f"{prefix}/attributes",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:phone-ring",
+            "device": self._device(),
+        })
+        self._publish_config("sensor", "call_monitor_last_event", {
+            "name": "Anrufmonitor Ereignis",
+            "unique_id": "fritzbox_tr064_call_monitor_last_event",
+            "state_topic": f"{prefix}/last_event",
+            "json_attributes_topic": f"{prefix}/attributes",
+            "icon": "mdi:phone-log",
+            "device": self._device(),
+        })
+
     def _publish_wan_discovery(self) -> None:
         sensors = [
             ("wan_downstream_max_mbit", "Verbindung Download", "wan/downstream_max_mbit", "Mbit/s", "mdi:download-network"),
@@ -749,6 +810,51 @@ class HomeAssistantMqttPublisher:
         }
 
 
+class FritzBoxCallMonitor(threading.Thread):
+    def __init__(
+        self,
+        options: Options,
+        publisher: HomeAssistantMqttPublisher,
+        stop_event: threading.Event,
+    ) -> None:
+        super().__init__(name="fritzbox-call-monitor", daemon=True)
+        self.options = options
+        self.publisher = publisher
+        self.stop_event = stop_event
+
+    def run(self) -> None:
+        if not self.options.call_monitor_enabled:
+            return
+        self.publisher.publish_call_monitor_state()
+        while not self.stop_event.is_set():
+            try:
+                self._read_events()
+            except Exception as exc:
+                LOG.debug("Call monitor not available or disconnected: %s", exc)
+                self.publisher.publish_call_monitor_state()
+                self.stop_event.wait(30)
+
+    def _read_events(self) -> None:
+        LOG.info("Connecting FRITZ!Box call monitor at %s:%s", self.options.fritz_host, self.options.call_monitor_port)
+        with socket.create_connection((self.options.fritz_host, self.options.call_monitor_port), timeout=10) as sock:
+            sock.settimeout(1)
+            with sock.makefile("r", encoding="utf-8", errors="replace") as stream:
+                while not self.stop_event.is_set():
+                    try:
+                        line = stream.readline()
+                    except TimeoutError:
+                        continue
+                    except socket.timeout:
+                        continue
+                    if not line:
+                        raise ConnectionError("call monitor connection closed")
+                    event = parse_call_monitor_line(line.strip())
+                    if event is None:
+                        continue
+                    LOG.info("Call monitor event %s state=%s", event.event, event.state)
+                    self.publisher.publish_call_monitor_state(event)
+
+
 def run() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
     options = load_options()
@@ -765,6 +871,8 @@ def run() -> None:
     fritz = FritzBoxTr064Client(options)
     publisher = HomeAssistantMqttPublisher(options, fritz)
     publisher.start()
+    call_monitor = FritzBoxCallMonitor(options, publisher, stop_event)
+    call_monitor.start()
 
     try:
         while not stop_event.is_set():
@@ -798,6 +906,7 @@ def run() -> None:
                     all_phonebooks.append(fritz.get_phonebook_info(phonebook_id))
                 except Exception as exc:
                     LOG.debug("Phonebook %s not available or not readable: %s", phonebook_id, exc)
+            all_phonebooks = apply_phonebook_name_overrides(all_phonebooks, options.phonebook_names)
             all_phonebooks = visible_phonebooks(all_phonebooks, options.phonebook_name_excludes)
             selected_phonebook_ids = selected_phonebooks(
                 publisher.selected_phonebooks,
@@ -820,6 +929,7 @@ def run() -> None:
             )
             stop_event.wait(options.poll_interval)
     finally:
+        call_monitor.join(timeout=2)
         publisher.stop()
 
 
@@ -858,7 +968,10 @@ def load_options() -> Options:
         max_wlan=max(1, min(5, int(raw.get("max_wlan", 4)))),
         call_lists=str(raw.get("call_lists", "all,incoming,outgoing,missed")),
         phonebooks=str(raw.get("phonebooks", "all")),
+        phonebook_names=str(raw.get("phonebook_names", "")),
         phonebook_name_excludes=str(raw.get("phonebook_name_excludes", "tellows")),
+        call_monitor_enabled=bool(raw.get("call_monitor_enabled", True)),
+        call_monitor_port=int(raw.get("call_monitor_port", 1012)),
         max_calls=max(1, min(100, int(raw.get("max_calls", 20)))),
         retain=bool(raw.get("retain", True)),
     )
@@ -892,6 +1005,33 @@ def visible_phonebooks(phonebooks: list[PhonebookInfo], excludes: str) -> list[P
         for phonebook in phonebooks
         if not any(pattern in phonebook.name.lower() for pattern in blocked)
     ]
+
+
+def apply_phonebook_name_overrides(phonebooks: list[PhonebookInfo], value: str) -> list[PhonebookInfo]:
+    overrides = parse_phonebook_name_overrides(value)
+    if not overrides:
+        return phonebooks
+    return [
+        PhonebookInfo(
+            phonebook.phonebook_id,
+            overrides.get(phonebook.phonebook_id, phonebook.name),
+            phonebook.contacts,
+        )
+        for phonebook in phonebooks
+    ]
+
+
+def parse_phonebook_name_overrides(value: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for item in value.split(","):
+        if ":" not in item:
+            continue
+        phonebook_id, name = item.split(":", 1)
+        phonebook_id = phonebook_id.strip()
+        name = name.strip()
+        if phonebook_id and name:
+            result[phonebook_id] = name
+    return result
 
 
 def phonebook_select_options(phonebooks: list[PhonebookInfo]) -> list[str]:
@@ -982,6 +1122,38 @@ def call_to_dict(call: CallEntry) -> dict[str, str]:
         "called": call.called,
         "number": call.number,
         "duration": call.duration,
+    }
+
+
+def parse_call_monitor_line(line: str) -> CallMonitorEvent | None:
+    parts = line.split(";")
+    if len(parts) < 2:
+        return None
+    timestamp = parts[0]
+    event = parts[1].upper()
+    if event == "RING" and len(parts) >= 6:
+        return CallMonitorEvent(event, "ringing", timestamp, parts[2], parts[3], parts[4], "", parts[5], "", line)
+    if event == "CALL" and len(parts) >= 7:
+        return CallMonitorEvent(event, "dialing", timestamp, parts[2], parts[4], parts[5], parts[3], parts[6], "", line)
+    if event == "CONNECT" and len(parts) >= 5:
+        return CallMonitorEvent(event, "connected", timestamp, parts[2], parts[4], "", parts[3], "", "", line)
+    if event == "DISCONNECT" and len(parts) >= 4:
+        return CallMonitorEvent(event, "idle", timestamp, parts[2], "", "", "", "", parts[3], line)
+    return CallMonitorEvent(event, event.lower(), timestamp, parts[2] if len(parts) > 2 else "", "", "", "", "", "", line)
+
+
+def call_monitor_event_to_dict(event: CallMonitorEvent) -> dict[str, str]:
+    return {
+        "event": event.event,
+        "state": event.state,
+        "timestamp": event.timestamp,
+        "connection_id": event.connection_id,
+        "caller": event.caller,
+        "called": event.called,
+        "extension": event.extension,
+        "line": event.line,
+        "duration": event.duration,
+        "raw": event.raw,
     }
 
 

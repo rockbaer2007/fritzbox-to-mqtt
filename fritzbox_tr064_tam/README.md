@@ -32,6 +32,14 @@ Call list entities, depending on `call_lists`:
 
 Each call list sensor reports the total count as its state and exposes up to `max_calls` entries in the `calls` attribute.
 
+Live call monitor entities, if `call_monitor_enabled` is true:
+
+- `Anrufmonitor Status`
+- `Telefon klingelt`
+- `Anrufmonitor Ereignis`
+
+The live monitor listens on FRITZ!Box port `1012` and publishes `RING`, `CALL`, `CONNECT`, and `DISCONNECT` events.
+
 Phonebook entities, depending on `phonebooks`:
 
 - `Telefonbücher`
@@ -74,10 +82,14 @@ user: homeassistant
 password: secret
 call_lists: all,incoming,outgoing,missed
 phonebooks: all
+phonebook_names: ""
 phonebook_name_excludes: tellows
+call_monitor_enabled: true
+call_monitor_port: 1012
 max_calls: 20
 ```
 
 MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.
 `phonebooks` is the startup selection; after the first successful scan, use the `Telefonbuch Anzeige` select entity in Home Assistant.
+`phonebook_names` can override generic FRITZ!Box names, for example `1:Privat,3:Firma`.
 `phonebook_name_excludes` hides matching FRITZ!Box phonebook names from the list, for example `tellows`.
