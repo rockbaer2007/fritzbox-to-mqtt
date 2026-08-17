@@ -132,7 +132,6 @@ class DectLineInfo:
     index: int
     internal_number: str
     device_number: str
-    no_ring_time: str
     name: str
 
     @property
@@ -572,7 +571,6 @@ class FritzBoxTr064Client:
         values.update(self._dect_list_values(index, device, values))
         values.update(self._voip_client_values(index, device, values))
         values.update(self._dect_user_values(index, device, values))
-        values.update(self._dect_user_index_values(index, values))
 
         if not values:
             return None
@@ -589,19 +587,11 @@ class FritzBoxTr064Client:
         device = number_value(values, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"])
         if not internal:
             internal = dect_internal_from_device(device)
-        no_ring_time = no_ring_time_value(values, [
-            "NewNoRingTime",
-            "NewNoRingTimeTime",
-            "NewNoRingTimeRange",
-            "NewX_AVM-DE_NoRingTime",
-            "NewX_AVM_DE_NoRingTime",
-        ])
         name = first_value(values, ["NewName", "NewHandsetName", "NewModel"])
         return DectLineInfo(
             index=index,
             internal_number=internal,
             device_number=device,
-            no_ring_time=no_ring_time,
             name=name,
         )
 
@@ -709,7 +699,6 @@ class FritzBoxTr064Client:
             extracted = {
                 "NewIntern": first_value(children, ["Intern", "InternalNumber", "HandsetNumber", "Number"]),
                 "NewDevice": first_value(children, ["ID", "Id", "Device", "DeviceNumber"]),
-                "NewNoRingTime": no_ring_time_value(children, ["NoRingTime", "NoRingTimeTime", "NoRingTimeRange"]),
                 "NewName": first_value(children, ["Name", "HandsetName", "Model"]),
             }
             extracted = {key: value for key, value in extracted.items() if value}
@@ -762,7 +751,6 @@ class FritzBoxTr064Client:
         extracted = {
             "NewIntern": number_value(entry, ["Intern", "InternalNumber", "HandsetNumber"]),
             "NewDevice": number_value(entry, ["Id", "ID", "Device", "DeviceNumber"]),
-            "NewNoRingTime": format_lua_no_ring_time(entry),
             "NewName": first_value(entry, ["Name", "HandsetName", "Model"]),
         }
         extracted = {key: value for key, value in extracted.items() if value}
@@ -788,8 +776,7 @@ class FritzBoxTr064Client:
                 "dectUser": (
                     "telcfg:settings/Foncontrol/User/list("
                     "Id,Name,Intern,IntRingTone,AlarmRingTone0,RadioRingID,ImagePath,"
-                    "G722RingTone,G722RingToneName,NoRingTime,RingAllowed,"
-                    "NoRingTimeFlags,NoRingWithNightSetting)"
+                    "G722RingTone,G722RingToneName)"
                 ),
             })
             self._log_values("Lua query dectUser", values)
@@ -798,41 +785,6 @@ class FritzBoxTr064Client:
             self._log_value_error("Lua query dectUser", exc)
             self._dect_user_entries = []
         return self._dect_user_entries
-
-    def _dect_user_index_values(self, index: int, current_values: dict[str, Any]) -> dict[str, str]:
-        query = {}
-        for candidate in unique_values([str(index), str(index + 1)]):
-            prefix = f"dectUser{candidate}"
-            base = f"telcfg:settings/Foncontrol/User{candidate}"
-            query[f"{prefix}_Intern"] = f"{base}/Intern"
-            query[f"{prefix}_NoRingTime"] = f"{base}/NoRingTime"
-            query[f"{prefix}_RingAllowed"] = f"{base}/RingAllowed"
-            query[f"{prefix}_Name"] = f"{base}/Name"
-        try:
-            values = self._lua_query(query)
-            self._log_values(f"Lua query DECT{index} indexed dectUser", values)
-        except Exception as exc:
-            self._log_value_error(f"Lua query DECT{index} indexed dectUser", exc)
-            return {}
-        current_name = first_value(current_values, ["NewName", "NewHandsetName", "NewModel"])
-        for candidate in unique_values([str(index), str(index + 1)]):
-            prefix = f"dectUser{candidate}"
-            indexed_name = first_value(values, [f"{prefix}_Name"])
-            if current_name and indexed_name and current_name != indexed_name:
-                continue
-            extracted = {
-                "NewIntern": number_value(values, [f"{prefix}_Intern"]),
-                "NewNoRingTime": format_lua_no_ring_time({
-                    "NoRingTime": values.get(f"{prefix}_NoRingTime", ""),
-                    "RingAllowed": values.get(f"{prefix}_RingAllowed", ""),
-                }),
-                "NewName": indexed_name,
-            }
-            extracted = {key: value for key, value in extracted.items() if value}
-            if extracted:
-                self._log_values(f"DECT{index} indexed dectUser match {candidate}", extracted)
-                return extracted
-        return {}
 
     def _control_urls_for_service(self, service_type: str, fallbacks: list[str]) -> list[str]:
         all_urls = self._discover_control_urls()
@@ -1152,12 +1104,11 @@ class HomeAssistantMqttPublisher:
             )
             for line in dect_lines:
                 LOG.info(
-                    "Publishing DECT%s values: name=%s intern=%s device=%s NoRingTime=%s",
+                    "Publishing DECT%s values: name=%s intern=%s device=%s",
                     line.index,
                     line.display_name,
                     line.internal_number or "unknown",
                     line.device_number or "unknown",
-                    line.no_ring_time or "unknown",
                 )
         self._publish_box_status_states(box_status)
         if self.options.include_dect_lines:
@@ -1165,14 +1116,12 @@ class HomeAssistantMqttPublisher:
                 prefix = f"{self.options.base_topic}/dect/{line.index}"
                 self._publish(f"{prefix}/intern", line.internal_number)
                 self._publish(f"{prefix}/device", line.device_number)
-                self._publish(f"{prefix}/NoRingTime", line.no_ring_time)
                 self._publish_json(f"{prefix}/attributes", {
                     "dect_index": line.index,
                     "name": line.name,
                     "display_name": line.display_name,
                     "internal_number": line.internal_number,
                     "device_number": line.device_number,
-                    "no_ring_time": line.no_ring_time,
                 })
 
     def publish_call_monitor_state(self, event: CallMonitorEvent | None = None) -> None:
@@ -1540,6 +1489,11 @@ class HomeAssistantMqttPublisher:
                         retain=True,
                     )
                 continue
+            self._publish(
+                f"{self.options.discovery_prefix}/sensor/fritzbox_tr064/dect{index}_NoRingTime/config",
+                "",
+                retain=True,
+            )
             line = lines_by_index[index]
             name = line.display_name
             prefix = f"{self.options.base_topic}/dect/{index}"
@@ -1557,14 +1511,6 @@ class HomeAssistantMqttPublisher:
                 "state_topic": f"{prefix}/device",
                 "json_attributes_topic": f"{prefix}/attributes",
                 "icon": "mdi:numeric",
-                "device": self._device(),
-            })
-            self._publish_config("sensor", f"dect{index}_NoRingTime", {
-                "name": f"{name} NoRingTime",
-                "unique_id": f"fritzbox_tr064_dect{index}_NoRingTime",
-                "state_topic": f"{prefix}/NoRingTime",
-                "json_attributes_topic": f"{prefix}/attributes",
-                "icon": "mdi:phone-clock",
                 "device": self._device(),
             })
 
@@ -2146,22 +2092,6 @@ def first_value(values: dict[str, Any], names: list[str]) -> str:
     return ""
 
 
-def no_ring_time_value(values: dict[str, Any], names: list[str]) -> str:
-    for name in names:
-        if "flags" in name.lower():
-            continue
-        value = str(values.get(name, "")).strip()
-        if value:
-            return normalize_no_ring_time(value)
-    for name, value in values.items():
-        lower_name = name.lower()
-        if "noringtime" in lower_name and "flags" not in lower_name:
-            text = str(value).strip()
-            if text:
-                return normalize_no_ring_time(text)
-    return ""
-
-
 def number_value(values: dict[str, Any], names: list[str]) -> str:
     value = first_value(values, names)
     if value.isdigit():
@@ -2202,43 +2132,11 @@ def collect_dect_user_entries(value: Any, entries: list[dict[str, Any]]) -> None
         return
     if isinstance(value, dict):
         lower_keys = {str(key).lower() for key in value}
-        if any(key.lower() in lower_keys for key in ["Intern", "NoRingTime", "RingAllowed", "NoRingTimeFlags"]):
+        if any(key.lower() in lower_keys for key in ["Intern", "InternalNumber", "HandsetNumber"]):
             entries.append(value)
             return
         for entry in value.values():
             collect_dect_user_entries(entry, entries)
-
-
-def format_lua_no_ring_time(values: dict[str, Any]) -> str:
-    value = first_value(values, ["NoRingTime"])
-    if not value:
-        return ""
-    value = normalize_no_ring_time(value)
-    if re.search(r"[A-Za-z]", value):
-        return value
-    day_prefix = ring_allowed_label(first_value(values, ["RingAllowed"]))
-    return f"{day_prefix} {value}".strip()
-
-
-def normalize_no_ring_time(value: str) -> str:
-    text = value.strip()
-    digits = re.sub(r"\D", "", text)
-    if text.isdigit() and len(text) == 8:
-        return f"{text[0:2]}:{text[2:4]}-{text[4:6]}:{text[6:8]}"
-    if len(digits) == 8 and ":" not in text and "-" not in text:
-        return f"{digits[0:2]}:{digits[2:4]}-{digits[4:6]}:{digits[6:8]}"
-    return text
-
-
-def ring_allowed_label(value: Any) -> str:
-    text = str(value).strip()
-    return {
-        "1": "Mo-So",
-        "2": "Mo-Fr 00:00-24:00 Sa-So",
-        "3": "Sa-So 00:00-24:00 Mo-Fr",
-        "4": "Sa-So",
-        "5": "Mo-Fr",
-    }.get(text, "")
 
 
 def find_text(element: ET.Element, local_name: str) -> str:
