@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.30
+
+- Display WLAN status and WAN link status sensors as `Ein`/`Aus` instead of raw FRITZ!Box values such as `Up` or `Disabled`.
+
 ## 0.1.29
 
 - Prepared the repository for public GitHub distribution.

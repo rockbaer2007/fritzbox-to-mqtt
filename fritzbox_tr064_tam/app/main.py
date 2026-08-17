@@ -1046,10 +1046,10 @@ class HomeAssistantMqttPublisher:
             slug = wlan_slug(info.index)
             prefix = f"{self.options.base_topic}/wlan/{slug}"
             self._publish(f"{prefix}/enabled", "ON" if info.enabled else "OFF")
-            self._publish(f"{prefix}/status", info.status)
+            self._publish(f"{prefix}/status", display_on_off_status(info.status))
             self._publish_json(
                 f"{prefix}/attributes",
-                {"wlan_index": info.index, "wlan_slug": slug, "ssid": info.ssid},
+                {"wlan_index": info.index, "wlan_slug": slug, "ssid": info.ssid, "raw_status": info.status},
             )
 
         for view in sorted(call_views):
@@ -1090,7 +1090,7 @@ class HomeAssistantMqttPublisher:
         if "byte_receive_rate" in wan:
             self._publish(f"{self.options.base_topic}/wan/download_kbit_s", format_kbit_per_second(wan["byte_receive_rate"]))
         if "physical_link_status" in wan:
-            self._publish(f"{self.options.base_topic}/wan/link_status", str(wan["physical_link_status"]))
+            self._publish(f"{self.options.base_topic}/wan/link_status", display_on_off_status(wan["physical_link_status"]))
 
         if self.options.log_value_details:
             LOG.info(
@@ -2163,6 +2163,18 @@ def format_mbit(bits_per_second: Any) -> str:
 
 def format_kbit_per_second(bytes_per_second: Any) -> str:
     return f"{as_int(bytes_per_second) * 8 / 1_000:.2f}"
+
+
+def display_on_off_status(value: Any) -> str:
+    text = str(value or "").strip()
+    normalized = text.lower()
+    on_values = {"1", "true", "yes", "on", "up", "enabled", "connected"}
+    off_values = {"0", "false", "no", "off", "down", "disabled", "disconnected", "error"}
+    if normalized in on_values:
+        return "Ein"
+    if normalized in off_values:
+        return "Aus"
+    return text or "Unbekannt"
 
 
 def escape_xml(value: Any) -> str:
