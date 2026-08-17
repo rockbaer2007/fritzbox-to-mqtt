@@ -1,5 +1,5 @@
 name: FRITZ!Box TR-064 to MQTT
-version: "0.1.16"
+version: "0.1.17"
 slug: fritzbox_tr064_tam
 description: Publish FRITZ!Box TR-064 data and live call events to Home Assistant via MQTT Discovery
 url: https://github.com/local/fritzbox-tr064-ha-addon
@@ -29,6 +29,7 @@ options:
   max_live_events: 20
   include_dect_lines: false
   max_dect_lines: 6
+  log_value_details: true
 schema:
   ip: str
   port: port
@@ -44,3 +45,4 @@ schema:
   max_live_events: int(1,100)
   include_dect_lines: bool
   max_dect_lines: int(1,10)
+  log_value_details: bool

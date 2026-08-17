@@ -77,6 +77,7 @@ class Options:
     max_live_events: int
     include_dect_lines: bool
     max_dect_lines: int
+    log_value_details: bool
     retain: bool
 
 
@@ -166,6 +167,7 @@ def wlan_index_from_slug(value: str) -> int | None:
 class FritzBoxTr064Client:
     def __init__(self, options: Options) -> None:
         scheme = "https" if options.fritz_ssl else "http"
+        self.options = options
         self.base_url = f"{scheme}://{options.fritz_host}:{options.fritz_port}"
         self.session = requests.Session()
         self.session.auth = HTTPDigestAuth(options.fritz_username, options.fritz_password)
@@ -224,10 +226,12 @@ class FritzBoxTr064Client:
                 "GetCommonLinkProperties",
                 {},
             )
+            self._log_values("WAN GetCommonLinkProperties", link)
             result["upstream_max_bps"] = as_int(link.get("NewLayer1UpstreamMaxBitRate"))
             result["downstream_max_bps"] = as_int(link.get("NewLayer1DownstreamMaxBitRate"))
             result["physical_link_status"] = str(link.get("NewPhysicalLinkStatus", "")).strip()
         except Exception as exc:
+            self._log_value_error("WAN GetCommonLinkProperties", exc)
             LOG.warning("Could not read WAN link properties: %s", exc)
 
         try:
@@ -237,9 +241,11 @@ class FritzBoxTr064Client:
                 "GetAddonInfos",
                 {},
             )
+            self._log_values("WAN GetAddonInfos", addon)
             result["byte_send_rate"] = as_int(addon.get("NewByteSendRate"))
             result["byte_receive_rate"] = as_int(addon.get("NewByteReceiveRate"))
         except Exception as exc:
+            self._log_value_error("WAN GetAddonInfos", exc)
             LOG.debug("Could not read WAN addon infos: %s", exc)
 
         try:
@@ -249,8 +255,10 @@ class FritzBoxTr064Client:
                 "GetTotalBytesSent",
                 {},
             )
+            self._log_values("WAN GetTotalBytesSent", sent)
             result["total_bytes_sent"] = as_int(sent.get("NewTotalBytesSent"))
         except Exception as exc:
+            self._log_value_error("WAN GetTotalBytesSent", exc)
             LOG.debug("Could not read WAN total bytes sent: %s", exc)
 
         try:
@@ -260,8 +268,10 @@ class FritzBoxTr064Client:
                 "GetTotalBytesReceived",
                 {},
             )
+            self._log_values("WAN GetTotalBytesReceived", received)
             result["total_bytes_received"] = as_int(received.get("NewTotalBytesReceived"))
         except Exception as exc:
+            self._log_value_error("WAN GetTotalBytesReceived", exc)
             LOG.debug("Could not read WAN total bytes received: %s", exc)
 
         return result
@@ -271,12 +281,14 @@ class FritzBoxTr064Client:
         dect_lines: list[DectLineInfo] = []
         try:
             info = self._soap("/upnp/control/deviceinfo", DEVICE_INFO_SERVICE, "GetInfo", {})
+            self._log_values("Box DeviceInfo GetInfo", info)
             result["box_meshRole"] = first_value(info, [
                 "NewX_AVM-DE_MeshRole",
                 "NewX_AVM_DE_MeshRole",
                 "NewMeshRole",
             ])
         except Exception as exc:
+            self._log_value_error("Box DeviceInfo GetInfo", exc)
             LOG.debug("Could not read mesh role: %s", exc)
 
         self._read_wan_connection_status(result, WAN_PPP_SERVICE, "/upnp/control/wanpppconn1")
@@ -287,6 +299,7 @@ class FritzBoxTr064Client:
 
         try:
             dect = self._soap("/upnp/control/x_dect", DECT_SERVICE, "GetNumberOfDectEntries", {})
+            self._log_values("DECT GetNumberOfDectEntries", dect)
             count = as_int(first_value(dect, ["NewNumberOfEntries", "NewNumberOfDectEntries"]))
             result["box_dect"] = count > 0
             if include_dect_lines:
@@ -295,21 +308,26 @@ class FritzBoxTr064Client:
                     if line is not None:
                         dect_lines.append(line)
         except Exception as exc:
+            self._log_value_error("DECT GetNumberOfDectEntries", exc)
             LOG.debug("Could not read DECT info: %s", exc)
 
         result.setdefault("box_dns_over_tls", None)
+        self._log_values("Box normalized status", result)
         return result, dect_lines
 
     def _read_wan_connection_status(self, result: dict[str, Any], service: str, control_url: str) -> None:
         try:
             status = self._soap(control_url, service, "GetStatusInfo", {})
+            self._log_values(f"WAN {control_url} GetStatusInfo", status)
             connection_status = str(status.get("NewConnectionStatus", "")).strip()
             if connection_status:
                 result["box_ppp_connect"] = connection_status
         except Exception as exc:
+            self._log_value_error(f"WAN {control_url} GetStatusInfo", exc)
             LOG.debug("Could not read WAN status %s: %s", control_url, exc)
         try:
             external = self._soap(control_url, service, "GetExternalIPAddress", {})
+            self._log_values(f"WAN {control_url} GetExternalIPAddress", external)
             ipv4 = first_value(external, [
                 "NewExternalIPAddress",
                 "NewX_AVM-DE_ExternalIPAddress",
@@ -320,9 +338,11 @@ class FritzBoxTr064Client:
             if ipv4:
                 result["ipv4_extern"] = ipv4
         except Exception as exc:
+            self._log_value_error(f"WAN {control_url} GetExternalIPAddress", exc)
             LOG.debug("Could not read external IPv4 %s: %s", control_url, exc)
         try:
             info = self._soap(control_url, service, "GetInfo", {})
+            self._log_values(f"WAN {control_url} GetInfo", info)
             ipv6 = first_value(info, [
                 "NewX_AVM-DE_ExternalIPv6Address",
                 "NewX_AVM_DE_ExternalIPv6Address",
@@ -334,6 +354,7 @@ class FritzBoxTr064Client:
             if ipv6:
                 result["ipv6_extern"] = ipv6
         except Exception as exc:
+            self._log_value_error(f"WAN {control_url} GetInfo", exc)
             LOG.debug("Could not read external IPv6 %s: %s", control_url, exc)
 
     def _get_dect_line(self, index: int) -> DectLineInfo | None:
@@ -343,6 +364,7 @@ class FritzBoxTr064Client:
         ]:
             try:
                 info = self._soap("/upnp/control/x_dect", DECT_SERVICE, action, {argument_name: index})
+                self._log_values(f"DECT{index} {action}", info)
                 internal = number_value(info, ["NewIntern", "NewInternalNumber", "NewHandsetNumber"])
                 device = number_value(info, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"])
                 no_ring_time = no_ring_time_value(info, [
@@ -361,8 +383,17 @@ class FritzBoxTr064Client:
                     name=name,
                 )
             except Exception as exc:
+                self._log_value_error(f"DECT{index} {action}", exc)
                 LOG.debug("Could not read DECT line %s with %s: %s", index, action, exc)
         return None
+
+    def _log_values(self, label: str, values: dict[str, Any]) -> None:
+        if self.options.log_value_details:
+            LOG.info("%s returned: %s", label, json.dumps(values, ensure_ascii=False, sort_keys=True))
+
+    def _log_value_error(self, label: str, exc: Exception) -> None:
+        if self.options.log_value_details:
+            LOG.info("%s failed: %s", label, exc)
 
     def get_call_entries(self) -> list[CallEntry]:
         result = self._soap("/upnp/control/x_contact", ONTEL_SERVICE, "GetCallList", {})
@@ -624,6 +655,25 @@ class HomeAssistantMqttPublisher:
         if "physical_link_status" in wan:
             self._publish(f"{self.options.base_topic}/wan/link_status", str(wan["physical_link_status"]))
 
+        if self.options.log_value_details:
+            LOG.info(
+                "Publishing box values: meshRole=%s ppp_connect=%s ipv4_extern=%s ipv6_extern=%s dect=%s dns_over_tls=%s",
+                box_status.get("box_meshRole") or "unknown",
+                box_status.get("box_ppp_connect") or "unknown",
+                box_status.get("ipv4_extern") or "unknown",
+                box_status.get("ipv6_extern") or "unknown",
+                box_status.get("box_dect", "unknown"),
+                box_status.get("box_dns_over_tls", "unknown"),
+            )
+            for line in dect_lines:
+                LOG.info(
+                    "Publishing DECT%s values: name=%s intern=%s device=%s NoRingTime=%s",
+                    line.index,
+                    line.display_name,
+                    line.internal_number or "unknown",
+                    line.device_number or "unknown",
+                    line.no_ring_time or "unknown",
+                )
         self._publish_box_status_states(box_status)
         if self.options.include_dect_lines:
             for line in dect_lines:
@@ -1267,6 +1317,7 @@ def load_options() -> Options:
         max_live_events=max(1, min(100, int(raw.get("max_live_events", 20)))),
         include_dect_lines=bool(raw.get("include_dect_lines", False)),
         max_dect_lines=max(1, min(10, int(raw.get("max_dect_lines", 6)))),
+        log_value_details=bool(raw.get("log_value_details", True)),
         retain=bool(raw.get("retain", True)),
     )
 
