@@ -39,6 +39,10 @@ This project is a Home Assistant Supervisor app, not a HACS custom integration o
 - Phonebook sensors and selectable phonebook display.
 - Optional DECT handset `intern` and `device` sensors with FRITZ!Box handset names.
 
+## Examples
+
+- [Mushroom status card](./examples/mushroom-status-card.yaml) for WAN rates, answering machines and WLAN status.
+
 ## App
 
 The app lives in [`fritzbox_tr064_tam`](./fritzbox_tr064_tam). The folder and some unique IDs intentionally keep the original internal name for upgrade compatibility.

@@ -93,6 +93,10 @@ Detected WLAN services:
 
 The SSID is exposed as an attribute and is not used as the entity name.
 
+## Lovelace Example
+
+A Mushroom status card example is available in [`../examples/mushroom-status-card.yaml`](../examples/mushroom-status-card.yaml).
+
 ## Requirements
 
 - TR-064 enabled on the FRITZ!Box.
