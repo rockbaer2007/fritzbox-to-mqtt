@@ -13,7 +13,7 @@ For each detected answering machine:
 - `AB0 Ein/Aus`
 - `AB0 Status`
 
-The AB status follows the FRITZ!Box `NewEnable` value. The raw `NewTAMRunning` and `NewStatus` values are exposed as attributes for diagnostics.
+The AB status binary sensor follows the FRITZ!Box `NewEnable` value. The switch is only the control entity. The raw `NewTAMRunning` and `NewStatus` values are exposed as attributes for diagnostics.
 
 WAN entities:
 

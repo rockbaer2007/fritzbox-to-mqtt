@@ -393,7 +393,7 @@ class HomeAssistantMqttPublisher:
             self._publish(f"{prefix}/new_messages", str(info.new_messages))
             self._publish(f"{prefix}/old_messages", str(info.old_messages))
             self._publish(f"{prefix}/enabled", "ON" if info.enabled else "OFF")
-            self._publish(f"{prefix}/running", "ON" if info.enabled else "OFF")
+            self._publish(f"{prefix}/status", "ON" if info.enabled else "OFF")
             self._publish_json(f"{prefix}/attributes", {
                 "ab_index": info.index,
                 "ab_name": info.name,
@@ -544,10 +544,11 @@ class HomeAssistantMqttPublisher:
             "icon": "mdi:answering-machine",
             "device": self._device(),
         })
-        self._publish_config("binary_sensor", f"ab{index}_running", {
+        self._remove_legacy_tam_running_discovery(index)
+        self._publish_config("binary_sensor", f"ab{index}_status", {
             "name": f"AB{index} Status",
-            "unique_id": f"fritzbox_tr064_ab{index}_running",
-            "state_topic": f"{prefix}/running",
+            "unique_id": f"fritzbox_tr064_ab{index}_status",
+            "state_topic": f"{prefix}/status",
             "json_attributes_topic": f"{prefix}/attributes",
             "payload_on": "ON",
             "payload_off": "OFF",
@@ -560,13 +561,21 @@ class HomeAssistantMqttPublisher:
             ("sensor", "new_messages"),
             ("sensor", "old_messages"),
             ("switch", "enabled"),
-            ("binary_sensor", "running"),
+            ("binary_sensor", "status"),
         ]:
             self._publish(
                 f"{self.options.discovery_prefix}/{component}/fritzbox_tr064/ab{index}_{suffix}/config",
                 "",
                 retain=True,
             )
+        self._remove_legacy_tam_running_discovery(index)
+
+    def _remove_legacy_tam_running_discovery(self, index: int) -> None:
+        self._publish(
+            f"{self.options.discovery_prefix}/binary_sensor/fritzbox_tr064/ab{index}_running/config",
+            "",
+            retain=True,
+        )
 
     def _publish_wlan_discovery(self, index: int) -> None:
         slug = wlan_slug(index)

@@ -39,5 +39,5 @@ The first three WLAN services use stable MQTT and Home Assistant object IDs:
 Further readable WLAN services use the fallback `wlan_service_4`, `wlan_service_5`, and so on.
 
 The switch entity calls TR-064 `SetEnable`, so `AB0 Ein/Aus` can enable or disable the corresponding answering machine.
-The AB status binary sensor also follows `NewEnable`; raw `NewTAMRunning` and `NewStatus` are kept as attributes because FRITZ!Box models report them differently.
+The AB status binary sensor follows `NewEnable`; the AB switch remains the control entity. Raw `NewTAMRunning` and `NewStatus` are kept as attributes because FRITZ!Box models report them differently.
 WLAN switches also call TR-064 `SetEnable`; for example `WLAN 2.4 GHz Ein/Aus` controls `WLANConfiguration:1`.
