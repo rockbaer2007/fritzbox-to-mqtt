@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
 import threading
 import time
@@ -19,8 +20,20 @@ from requests.auth import HTTPDigestAuth
 LOG = logging.getLogger("fritzbox_tr064_tam")
 SOAP_ENV = "http://schemas.xmlsoap.org/soap/envelope/"
 TAM_SERVICE = "urn:dslforum-org:service:X_AVM-DE_TAM:1"
+ONTEL_SERVICE = "urn:dslforum-org:service:X_AVM-DE_OnTel:1"
 WAN_COMMON_SERVICE = "urn:dslforum-org:service:WANCommonInterfaceConfig:1"
 WLAN_SERVICE_TEMPLATE = "urn:dslforum-org:service:WLANConfiguration:{index}"
+CALL_VIEW_LABELS = {
+    "all": "Alle Anrufe",
+    "incoming": "Eingehende Anrufe",
+    "outgoing": "Ausgehende Anrufe",
+    "missed": "Verpasste Anrufe",
+}
+CALL_TYPE_VIEWS = {
+    "1": "incoming",
+    "2": "missed",
+    "3": "outgoing",
+}
 WLAN_ROLES = {
     1: ("wlan2_4", "WLAN 2.4 GHz"),
     2: ("wlan5", "WLAN 5 GHz"),
@@ -44,6 +57,9 @@ class Options:
     poll_interval: int
     max_tam: int
     max_wlan: int
+    call_lists: str
+    phonebooks: str
+    max_calls: int
     retain: bool
 
 
@@ -64,6 +80,25 @@ class WlanInfo:
     enabled: bool
     status: str
     ssid: str
+
+
+@dataclass(frozen=True)
+class CallEntry:
+    type_id: str
+    view: str
+    date: str
+    name: str
+    caller: str
+    called: str
+    number: str
+    duration: str
+
+
+@dataclass(frozen=True)
+class PhonebookInfo:
+    phonebook_id: str
+    name: str
+    contacts: list[dict[str, str]]
 
 
 def wlan_slug(index: int) -> str:
@@ -164,6 +199,62 @@ class FritzBoxTr064Client:
 
         return result
 
+    def get_call_entries(self) -> list[CallEntry]:
+        result = self._soap("/upnp/control/x_contact", ONTEL_SERVICE, "GetCallList", {})
+        url = str(result.get("NewCallListURL", "")).strip()
+        if not url:
+            return []
+        root = self._get_xml_url(url)
+        entries: list[CallEntry] = []
+        for call in root.findall(".//Call"):
+            type_id = find_text(call, "Type").strip()
+            caller = first_text(call, ["Caller", "Number"])
+            called = first_text(call, ["Called", "CalledNumber"])
+            name = find_text(call, "Name").strip()
+            entries.append(CallEntry(
+                type_id=type_id,
+                view=CALL_TYPE_VIEWS.get(type_id, "other"),
+                date=find_text(call, "Date").strip(),
+                name=name,
+                caller=caller,
+                called=called,
+                number=caller or called,
+                duration=find_text(call, "Duration").strip(),
+            ))
+        return entries
+
+    def get_phonebook_ids(self) -> list[str]:
+        result = self._soap("/upnp/control/x_contact", ONTEL_SERVICE, "GetPhonebookList", {})
+        value = str(result.get("NewPhonebookList", "")).strip()
+        return [item.strip() for item in value.split(",") if item.strip()]
+
+    def get_phonebook_info(self, phonebook_id: str) -> PhonebookInfo:
+        result = self._soap(
+            "/upnp/control/x_contact",
+            ONTEL_SERVICE,
+            "GetPhonebook",
+            {"NewPhonebookID": phonebook_id},
+        )
+        url = str(result.get("NewPhonebookURL", "")).strip()
+        if not url:
+            return PhonebookInfo(phonebook_id, f"Telefonbuch {phonebook_id}", [])
+        root = self._get_xml_url(url)
+        name = root.attrib.get("name") or find_text(root, "Name") or f"Telefonbuch {phonebook_id}"
+        contacts: list[dict[str, str]] = []
+        for contact in root.findall(".//contact"):
+            person = contact.find("person")
+            display_name = find_text(person, "realName") if person is not None else ""
+            numbers = []
+            for number in contact.findall(".//number"):
+                value = (number.text or "").strip()
+                if value:
+                    numbers.append(value)
+            contacts.append({
+                "name": display_name.strip(),
+                "numbers": ", ".join(numbers),
+            })
+        return PhonebookInfo(phonebook_id, name.strip(), contacts)
+
     def _get_message_counts(self, index: int) -> tuple[int, int]:
         result = self._soap(
             "/upnp/control/x_tam",
@@ -187,6 +278,11 @@ class FritzBoxTr064Client:
             else:
                 old_count += 1
         return new_count, old_count
+
+    def _get_xml_url(self, url: str) -> ET.Element:
+        response = self.session.get(urllib.parse.urljoin(self.base_url, url), timeout=15)
+        response.raise_for_status()
+        return ET.fromstring(response.content)
 
     def _soap(
         self,
@@ -231,6 +327,8 @@ class HomeAssistantMqttPublisher:
             self.client.username_pw_set(options.mqtt_username, options.mqtt_password)
         self.known_tam_indices: set[int] = set()
         self.known_wlan_indices: set[int] = set()
+        self.known_call_views: set[str] = set()
+        self.known_phonebook_ids: set[str] = set()
 
     def start(self) -> None:
         self.client.on_connect = self._on_connect
@@ -242,7 +340,13 @@ class HomeAssistantMqttPublisher:
         self.client.loop_stop()
         self.client.disconnect()
 
-    def publish_discovery(self, present_tam_indices: set[int], present_wlan_indices: set[int]) -> None:
+    def publish_discovery(
+        self,
+        present_tam_indices: set[int],
+        present_wlan_indices: set[int],
+        call_views: set[str],
+        phonebook_ids: set[str],
+    ) -> None:
         for index in range(self.options.max_tam):
             if index in present_tam_indices:
                 self._publish_tam_discovery(index)
@@ -253,11 +357,29 @@ class HomeAssistantMqttPublisher:
                 self._publish_wlan_discovery(index)
             else:
                 self._remove_wlan_discovery(index)
+        for view in call_views:
+            self._publish_call_discovery(view)
+        for view in self.known_call_views - call_views:
+            self._remove_call_discovery(view)
+        for phonebook_id in phonebook_ids:
+            self._publish_phonebook_discovery(phonebook_id)
+        for phonebook_id in self.known_phonebook_ids - phonebook_ids:
+            self._remove_phonebook_discovery(phonebook_id)
         self._publish_wan_discovery()
         self.known_tam_indices = set(present_tam_indices)
         self.known_wlan_indices = set(present_wlan_indices)
+        self.known_call_views = set(call_views)
+        self.known_phonebook_ids = set(phonebook_ids)
 
-    def publish_states(self, tam_infos: list[TamInfo], wlan_infos: list[WlanInfo], wan: dict[str, Any]) -> None:
+    def publish_states(
+        self,
+        tam_infos: list[TamInfo],
+        wlan_infos: list[WlanInfo],
+        wan: dict[str, Any],
+        calls: list[CallEntry],
+        call_views: set[str],
+        phonebooks: list[PhonebookInfo],
+    ) -> None:
         for info in tam_infos:
             prefix = f"{self.options.base_topic}/ab/{info.index}"
             self._publish(f"{prefix}/new_messages", str(info.new_messages))
@@ -275,6 +397,26 @@ class HomeAssistantMqttPublisher:
                 f"{prefix}/attributes",
                 {"wlan_index": info.index, "wlan_slug": slug, "ssid": info.ssid},
             )
+
+        for view in sorted(call_views):
+            filtered = calls if view == "all" else [call for call in calls if call.view == view]
+            visible = filtered[:self.options.max_calls]
+            prefix = f"{self.options.base_topic}/calls/{view}"
+            self._publish(f"{prefix}/count", str(len(filtered)))
+            self._publish_json(f"{prefix}/attributes", {
+                "view": view,
+                "max_calls": self.options.max_calls,
+                "calls": [call_to_dict(call) for call in visible],
+            })
+
+        for phonebook in phonebooks:
+            prefix = f"{self.options.base_topic}/phonebook/{safe_object_part(phonebook.phonebook_id)}"
+            self._publish(f"{prefix}/count", str(len(phonebook.contacts)))
+            self._publish_json(f"{prefix}/attributes", {
+                "phonebook_id": phonebook.phonebook_id,
+                "phonebook_name": phonebook.name,
+                "contacts": phonebook.contacts[:50],
+            })
 
         if "upstream_max_bps" in wan:
             self._publish(f"{self.options.base_topic}/wan/upstream_max_mbit", format_mbit(wan["upstream_max_bps"]))
@@ -442,6 +584,46 @@ class HomeAssistantMqttPublisher:
                 retain=True,
             )
 
+    def _publish_call_discovery(self, view: str) -> None:
+        label = CALL_VIEW_LABELS.get(view, f"Anrufe {view}")
+        prefix = f"{self.options.base_topic}/calls/{view}"
+        self._publish_config("sensor", f"calls_{view}", {
+            "name": label,
+            "unique_id": f"fritzbox_tr064_calls_{view}",
+            "state_topic": f"{prefix}/count",
+            "json_attributes_topic": f"{prefix}/attributes",
+            "icon": "mdi:phone-log",
+            "state_class": "measurement",
+            "device": self._device(),
+        })
+
+    def _remove_call_discovery(self, view: str) -> None:
+        self._publish(
+            f"{self.options.discovery_prefix}/sensor/fritzbox_tr064/calls_{view}/config",
+            "",
+            retain=True,
+        )
+
+    def _publish_phonebook_discovery(self, phonebook_id: str) -> None:
+        object_part = safe_object_part(phonebook_id)
+        prefix = f"{self.options.base_topic}/phonebook/{object_part}"
+        self._publish_config("sensor", f"phonebook_{object_part}", {
+            "name": f"Telefonbuch {phonebook_id}",
+            "unique_id": f"fritzbox_tr064_phonebook_{object_part}",
+            "state_topic": f"{prefix}/count",
+            "json_attributes_topic": f"{prefix}/attributes",
+            "icon": "mdi:book-account",
+            "state_class": "measurement",
+            "device": self._device(),
+        })
+
+    def _remove_phonebook_discovery(self, phonebook_id: str) -> None:
+        self._publish(
+            f"{self.options.discovery_prefix}/sensor/fritzbox_tr064/phonebook_{safe_object_part(phonebook_id)}/config",
+            "",
+            retain=True,
+        )
+
     def _publish_wan_discovery(self) -> None:
         sensors = [
             ("wan_downstream_max_mbit", "Verbindung Download", "wan/downstream_max_mbit", "Mbit/s", "mdi:download-network"),
@@ -514,14 +696,35 @@ def run() -> None:
                     wlan_infos.append(fritz.get_wlan_info(index))
                 except Exception as exc:
                     LOG.info("WLAN%s not available or not readable: %s", index, exc)
+            try:
+                calls = fritz.get_call_entries()
+            except Exception as exc:
+                LOG.info("Call list not available or not readable: %s", exc)
+                calls = []
+            try:
+                all_phonebook_ids = fritz.get_phonebook_ids()
+                selected_phonebook_ids = selected_phonebooks(options.phonebooks, all_phonebook_ids)
+            except Exception as exc:
+                LOG.info("Phonebooks not available or not readable: %s", exc)
+                selected_phonebook_ids = []
+            phonebooks = []
+            for phonebook_id in selected_phonebook_ids:
+                try:
+                    phonebooks.append(fritz.get_phonebook_info(phonebook_id))
+                except Exception as exc:
+                    LOG.info("Phonebook %s not available or not readable: %s", phonebook_id, exc)
+            call_views = selected_call_views(options.call_lists)
             present_tam = {info.index for info in tam_infos}
             present_wlan = {info.index for info in wlan_infos}
-            publisher.publish_discovery(present_tam, present_wlan)
-            publisher.publish_states(tam_infos, wlan_infos, fritz.get_wan_common())
+            present_phonebooks = {phonebook.phonebook_id for phonebook in phonebooks}
+            publisher.publish_discovery(present_tam, present_wlan, call_views, present_phonebooks)
+            publisher.publish_states(tam_infos, wlan_infos, fritz.get_wan_common(), calls, call_views, phonebooks)
             LOG.info(
-                "Published %s answering machines, %s WLAN services and WAN state",
+                "Published %s answering machines, %s WLAN services, %s call views, %s phonebooks and WAN state",
                 len(tam_infos),
                 len(wlan_infos),
+                len(call_views),
+                len(phonebooks),
             )
             stop_event.wait(options.poll_interval)
     finally:
@@ -561,8 +764,51 @@ def load_options() -> Options:
         poll_interval=int(raw.get("poll_interval", 60)),
         max_tam=max(1, min(5, int(raw.get("max_tam", 5)))),
         max_wlan=max(1, min(5, int(raw.get("max_wlan", 4)))),
+        call_lists=str(raw.get("call_lists", "all,incoming,outgoing,missed")),
+        phonebooks=str(raw.get("phonebooks", "all")),
+        max_calls=max(1, min(100, int(raw.get("max_calls", 20)))),
         retain=bool(raw.get("retain", True)),
     )
+
+
+def selected_call_views(value: str) -> set[str]:
+    requested = {item.strip().lower() for item in value.split(",") if item.strip()}
+    selected = requested & set(CALL_VIEW_LABELS)
+    return selected or {"all"}
+
+
+def selected_phonebooks(value: str, available_ids: list[str]) -> list[str]:
+    requested = [item.strip() for item in value.split(",") if item.strip()]
+    if not requested or any(item.lower() == "all" for item in requested):
+        return available_ids
+    available = set(available_ids)
+    return [item for item in requested if item in available]
+
+
+def call_to_dict(call: CallEntry) -> dict[str, str]:
+    return {
+        "type": call.view,
+        "type_id": call.type_id,
+        "date": call.date,
+        "name": call.name,
+        "caller": call.caller,
+        "called": call.called,
+        "number": call.number,
+        "duration": call.duration,
+    }
+
+
+def safe_object_part(value: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_]+", "_", value.strip().lower())
+    return safe.strip("_") or "unknown"
+
+
+def first_text(element: ET.Element, names: list[str]) -> str:
+    for name in names:
+        value = find_text(element, name).strip()
+        if value:
+            return value
+    return ""
 
 
 def find_text(element: ET.Element, local_name: str) -> str:

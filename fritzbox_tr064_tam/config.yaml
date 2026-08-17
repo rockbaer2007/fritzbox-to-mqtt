@@ -17,8 +17,14 @@ options:
   port: 49000
   user: ""
   password: ""
+  call_lists: all,incoming,outgoing,missed
+  phonebooks: all
+  max_calls: 20
 schema:
   ip: str
   port: port
   user: str
   password: password
+  call_lists: str
+  phonebooks: str
+  max_calls: int(1,100)

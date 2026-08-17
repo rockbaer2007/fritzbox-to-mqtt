@@ -7,11 +7,24 @@ ip: fritz.box
 port: 49000
 user: homeassistant
 password: secret
+call_lists: all,incoming,outgoing,missed
+phonebooks: all
+max_calls: 20
 ```
 
-The visible Home Assistant add-on configuration only asks for the FRITZ!Box connection.
+The visible Home Assistant add-on configuration asks for the FRITZ!Box connection and display choices.
 MQTT discovery uses the Home Assistant defaults internally:
 `core-mosquitto`, port `1883`, discovery prefix `homeassistant`, base topic `fritzbox/tr064`, polling every 60 seconds, up to five answering machines and up to four WLAN services.
+
+`call_lists` is a comma-separated selection of:
+
+- `all`
+- `incoming`
+- `outgoing`
+- `missed`
+
+`phonebooks` can be `all` or a comma-separated list of FRITZ!Box phonebook IDs, for example `0,1`.
+`max_calls` limits how many calls are included in the sensor attributes. The sensor state still reports the total count for the selected list.
 
 The add-on probes answering machine indexes `0` to `max_tam - 1` and publishes discovery only for readable/present entries.
 It probes WLAN TR-064 services from `WLANConfiguration:1` to `WLANConfiguration:max_wlan` and publishes only services that answer successfully.
