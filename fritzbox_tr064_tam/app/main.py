@@ -192,6 +192,7 @@ class FritzBoxTr064Client:
         self.session.auth = HTTPDigestAuth(options.fritz_username, options.fritz_password)
         self.session.verify = False
         self._service_control_urls: dict[str, list[str]] | None = None
+        self._dect_user_entries: list[dict[str, Any]] | None = None
 
     def get_tam_info(self, index: int) -> TamInfo:
         info = self._soap("/upnp/control/x_tam", TAM_SERVICE, "GetInfo", {"NewIndex": index})
@@ -570,11 +571,23 @@ class FritzBoxTr064Client:
 
         values.update(self._dect_list_values(index, device, values))
         values.update(self._voip_client_values(index, device, values))
+        values.update(self._dect_user_values(index, device, values))
 
         if not values:
             return None
-        internal = number_value(values, ["NewIntern", "NewInternalNumber", "NewHandsetNumber"])
+        internal = number_value(values, [
+            "NewIntern",
+            "NewInternalNumber",
+            "NewHandsetNumber",
+            "Intern",
+            "InternalNumber",
+            "HandsetNumber",
+            "NewX_AVM-DE_InternalNumber",
+            "NewX_AVM_DE_InternalNumber",
+        ])
         device = number_value(values, ["NewDevice", "NewDeviceNumber", "NewNumber", "NewID"])
+        if not internal:
+            internal = dect_internal_from_device(device)
         no_ring_time = no_ring_time_value(values, [
             "NewNoRingTime",
             "NewNoRingTimeTime",
@@ -740,6 +753,50 @@ class FritzBoxTr064Client:
                 internal = first_value(client, ["NewX_AVM-DE_InternalNumber", "NewX_AVM_DE_InternalNumber"])
                 return {"NewIntern": internal} if internal else {}
         return {}
+
+    def _dect_user_values(self, index: int, device: str, values: dict[str, Any]) -> dict[str, str]:
+        entry = self._matching_dect_user_entry(index, device, values)
+        if not entry:
+            return {}
+        extracted = {
+            "NewIntern": number_value(entry, ["Intern", "InternalNumber", "HandsetNumber"]),
+            "NewDevice": number_value(entry, ["Id", "ID", "Device", "DeviceNumber"]),
+            "NewNoRingTime": format_lua_no_ring_time(entry),
+            "NewName": first_value(entry, ["Name", "HandsetName", "Model"]),
+        }
+        extracted = {key: value for key, value in extracted.items() if value}
+        self._log_values(f"DECT{index} Lua dectUser match", extracted)
+        return extracted
+
+    def _matching_dect_user_entry(self, index: int, device: str, values: dict[str, Any]) -> dict[str, Any] | None:
+        entries = self._get_dect_user_entries()
+        name = first_value(values, ["NewName", "NewHandsetName", "NewModel"])
+        ids = unique_values([device, str(index), str(index + 1)])
+        for entry in entries:
+            entry_id = number_value(entry, ["Id", "ID", "Device", "DeviceNumber"])
+            entry_name = first_value(entry, ["Name", "HandsetName", "Model"])
+            if (entry_id and entry_id in ids) or (name and entry_name and entry_name == name):
+                return entry
+        return entries[index] if 0 <= index < len(entries) else None
+
+    def _get_dect_user_entries(self) -> list[dict[str, Any]]:
+        if self._dect_user_entries is not None:
+            return self._dect_user_entries
+        try:
+            values = self._lua_query({
+                "dectUser": (
+                    "telcfg:settings/Foncontrol/User/list("
+                    "Id,Name,Intern,IntRingTone,AlarmRingTone0,RadioRingID,ImagePath,"
+                    "G722RingTone,G722RingToneName,NoRingTime,RingAllowed,"
+                    "NoRingTimeFlags,NoRingWithNightSetting)"
+                ),
+            })
+            self._log_values("Lua query dectUser", values)
+            self._dect_user_entries = dict_list(values.get("dectUser", []))
+        except Exception as exc:
+            self._log_value_error("Lua query dectUser", exc)
+            self._dect_user_entries = []
+        return self._dect_user_entries
 
     def _control_urls_for_service(self, service_type: str, fallbacks: list[str]) -> list[str]:
         all_urls = self._discover_control_urls()
@@ -2070,6 +2127,47 @@ def number_value(values: dict[str, Any], names: list[str]) -> str:
         return value
     match = re.search(r"\d+", value)
     return match.group(0) if match else ""
+
+
+def dect_internal_from_device(device: str) -> str:
+    value = as_int(device)
+    if 600 <= value <= 699:
+        return str(value)
+    if 1 <= value <= 99:
+        return str(599 + value)
+    return ""
+
+
+def dict_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [entry for entry in value if isinstance(entry, dict)]
+    if isinstance(value, dict):
+        nested = [entry for entry in value.values() if isinstance(entry, dict)]
+        if nested:
+            return nested
+        return [value]
+    return []
+
+
+def format_lua_no_ring_time(values: dict[str, Any]) -> str:
+    value = str(values.get("NoRingTime", "")).strip()
+    if not value:
+        return ""
+    if value.isdigit() and len(value) == 8:
+        value = f"{value[0:2]}:{value[2:4]}-{value[4:6]}:{value[6:8]}"
+    day_prefix = ring_allowed_label(values.get("RingAllowed"))
+    return f"{day_prefix} {value}".strip()
+
+
+def ring_allowed_label(value: Any) -> str:
+    text = str(value).strip()
+    return {
+        "1": "Mo-So",
+        "2": "Mo-Fr 00:00-24:00 Sa-So",
+        "3": "Sa-So 00:00-24:00 Mo-Fr",
+        "4": "Sa-So",
+        "5": "Mo-Fr",
+    }.get(text, "")
 
 
 def find_text(element: ET.Element, local_name: str) -> str:

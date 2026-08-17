@@ -36,7 +36,7 @@ Web fallbacks use the FRITZ!Box web interface on `http(s)://<ip>/`, not the TR-0
 Additional box status sensors include text sensors for `box_meshRole`, `box_ppp_connect`, `ipv4_extern` (`Box PPP IPv4 Extern`), and `ipv6_extern` (`Box IPv6 Extern`), plus binary sensors for `box_dect` and `box_dns_over_tls` where the FRITZ!Box exposes them. Missing text values are published as `unknown`.
 Mesh role uses TR-064 mesh XML first and falls back to the FHEM-style `data.lua?page=wlanmesh` query.
 If no mesh role source returns a value, `Box Mesh Rolle` publishes the FHEM default `master`.
-If `include_dect_lines` is true, the add-on also publishes `dect*_intern`, `dect*_device`, and `dect*_NoRingTime` sensors up to `max_dect_lines`. The Home Assistant sensor names use the FRITZ!Box handset name when available. `intern` and `device` publish numeric values only; `NoRingTime` ignores `NoRingTimeFlags`. DECT details combine `GetGenericDectEntry`, `GetDECTHandsetInfo`, the DECT list XML, and VoIP client data where available.
+If `include_dect_lines` is true, the add-on also publishes `dect*_intern`, `dect*_device`, and `dect*_NoRingTime` sensors up to `max_dect_lines`. The Home Assistant sensor names use the FRITZ!Box handset name when available. `intern` and `device` publish numeric values only; `NoRingTime` ignores `NoRingTimeFlags`. DECT details combine `GetGenericDectEntry`, `GetDECTHandsetInfo`, the DECT list XML, VoIP client data, and the FritzSmart-style `telcfg:settings/Foncontrol/User/list(...)` Lua query where available. If no internal number is exposed directly, the add-on falls back from the DECT device ID to the usual FRITZ!Box range (`1` -> `600`, `2` -> `601`).
 
 `call_lists` is a comma-separated selection of:
 
