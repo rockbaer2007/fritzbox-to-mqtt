@@ -1,6 +1,6 @@
-# FritzBox TR-064 TAM MQTT
+# FRITZ!Box TR-064 to MQTT
 
-Home Assistant add-on for reading FRITZ!Box answering machines through TR-064 and publishing the result through MQTT Discovery.
+Home Assistant add-on for reading FRITZ!Box TR-064 data and live call events and publishing the result through MQTT Discovery.
 
 It creates entities for detected answering machines only. The entity names use `AB0` to `AB4`; the FRITZ!Box answering machine name is exposed only as an attribute.
 
