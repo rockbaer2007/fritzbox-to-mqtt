@@ -32,11 +32,15 @@ Each call list sensor reports the total count as its state and exposes up to `ma
 
 Phonebook entities, depending on `phonebooks`:
 
+- `Telefonbücher`
+- `Telefonbuch Anzeige`
 - `Telefonbuch 0`
 - `Telefonbuch 1`
 - further detected FRITZ!Box phonebooks
 
-Each phonebook sensor reports the contact count as its state and exposes the FRITZ!Box phonebook name as an attribute.
+`Telefonbücher` lists all detected FRITZ!Box phonebooks in its attributes.
+`Telefonbuch Anzeige` is a Home Assistant select entity for choosing `Alle Telefonbücher` or one detected phonebook.
+Each selected phonebook sensor reports the contact count as its state and exposes the FRITZ!Box phonebook name as an attribute.
 
 Detected WLAN services:
 
@@ -71,3 +75,4 @@ max_calls: 20
 ```
 
 MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.
+`phonebooks` is the startup selection; after the first successful scan, use the `Telefonbuch Anzeige` select entity in Home Assistant.

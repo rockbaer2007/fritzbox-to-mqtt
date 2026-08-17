@@ -329,6 +329,7 @@ class HomeAssistantMqttPublisher:
         self.known_wlan_indices: set[int] = set()
         self.known_call_views: set[str] = set()
         self.known_phonebook_ids: set[str] = set()
+        self.selected_phonebook = self.options.phonebooks.strip() or "all"
 
     def start(self) -> None:
         self.client.on_connect = self._on_connect
@@ -346,6 +347,7 @@ class HomeAssistantMqttPublisher:
         present_wlan_indices: set[int],
         call_views: set[str],
         phonebook_ids: set[str],
+        all_phonebooks: list[PhonebookInfo],
     ) -> None:
         for index in range(self.options.max_tam):
             if index in present_tam_indices:
@@ -365,6 +367,8 @@ class HomeAssistantMqttPublisher:
             self._publish_phonebook_discovery(phonebook_id)
         for phonebook_id in self.known_phonebook_ids - phonebook_ids:
             self._remove_phonebook_discovery(phonebook_id)
+        self._publish_phonebook_overview_discovery()
+        self._publish_phonebook_select_discovery(all_phonebooks)
         self._publish_wan_discovery()
         self.known_tam_indices = set(present_tam_indices)
         self.known_wlan_indices = set(present_wlan_indices)
@@ -379,6 +383,7 @@ class HomeAssistantMqttPublisher:
         calls: list[CallEntry],
         call_views: set[str],
         phonebooks: list[PhonebookInfo],
+        all_phonebooks: list[PhonebookInfo],
     ) -> None:
         for info in tam_infos:
             prefix = f"{self.options.base_topic}/ab/{info.index}"
@@ -418,6 +423,13 @@ class HomeAssistantMqttPublisher:
                 "contacts": phonebook.contacts[:50],
             })
 
+        self._publish(f"{self.options.base_topic}/phonebooks/count", str(len(all_phonebooks)))
+        self._publish(f"{self.options.base_topic}/phonebooks/selection", phonebook_selection_label(self.selected_phonebook, all_phonebooks))
+        self._publish_json(f"{self.options.base_topic}/phonebooks/attributes", {
+            "selected": self.selected_phonebook,
+            "phonebooks": [phonebook_summary(phonebook) for phonebook in all_phonebooks],
+        })
+
         if "upstream_max_bps" in wan:
             self._publish(f"{self.options.base_topic}/wan/upstream_max_mbit", format_mbit(wan["upstream_max_bps"]))
         if "downstream_max_bps" in wan:
@@ -433,15 +445,20 @@ class HomeAssistantMqttPublisher:
         LOG.info("Connected to MQTT broker with result %s", reason_code)
         client.subscribe(f"{self.options.base_topic}/ab/+/enabled/set")
         client.subscribe(f"{self.options.base_topic}/wlan/+/enabled/set")
+        client.subscribe(f"{self.options.base_topic}/phonebooks/selection/set")
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         topic = message.topic
-        payload = message.payload.decode("utf-8", errors="replace").strip().upper()
+        raw_payload = message.payload.decode("utf-8", errors="replace").strip()
+        payload = raw_payload.upper()
         if topic.startswith(f"{self.options.base_topic}/ab/") and topic.endswith("/enabled/set"):
             self._handle_tam_command(topic, payload)
             return
         if topic.startswith(f"{self.options.base_topic}/wlan/") and topic.endswith("/enabled/set"):
             self._handle_wlan_command(topic, payload)
+            return
+        if topic == f"{self.options.base_topic}/phonebooks/selection/set":
+            self._handle_phonebook_selection(raw_payload)
 
     def _handle_tam_command(self, topic: str, payload: str) -> None:
         marker = f"{self.options.base_topic}/ab/"
@@ -480,6 +497,12 @@ class HomeAssistantMqttPublisher:
             self._publish(f"{self.options.base_topic}/wlan/{wlan_slug(index)}/enabled", "ON" if enabled else "OFF")
         except Exception as exc:
             LOG.error("Could not set %s enabled state: %s", wlan_label(index), exc)
+
+    def _handle_phonebook_selection(self, payload: str) -> None:
+        selection = phonebook_selection_value(payload)
+        self.selected_phonebook = selection
+        self._publish(f"{self.options.base_topic}/phonebooks/selection", payload)
+        LOG.info("Selected phonebook display: %s", selection)
 
     def _publish_tam_discovery(self, index: int) -> None:
         prefix = f"{self.options.base_topic}/ab/{index}"
@@ -624,6 +647,30 @@ class HomeAssistantMqttPublisher:
             retain=True,
         )
 
+    def _publish_phonebook_overview_discovery(self) -> None:
+        prefix = f"{self.options.base_topic}/phonebooks"
+        self._publish_config("sensor", "phonebooks", {
+            "name": "Telefonbücher",
+            "unique_id": "fritzbox_tr064_phonebooks",
+            "state_topic": f"{prefix}/count",
+            "json_attributes_topic": f"{prefix}/attributes",
+            "icon": "mdi:book-multiple",
+            "state_class": "measurement",
+            "device": self._device(),
+        })
+
+    def _publish_phonebook_select_discovery(self, phonebooks: list[PhonebookInfo]) -> None:
+        prefix = f"{self.options.base_topic}/phonebooks"
+        self._publish_config("select", "phonebook_selection", {
+            "name": "Telefonbuch Anzeige",
+            "unique_id": "fritzbox_tr064_phonebook_selection",
+            "state_topic": f"{prefix}/selection",
+            "command_topic": f"{prefix}/selection/set",
+            "options": phonebook_select_options(phonebooks),
+            "icon": "mdi:book-cog",
+            "device": self._device(),
+        })
+
     def _publish_wan_discovery(self) -> None:
         sensors = [
             ("wan_downstream_max_mbit", "Verbindung Download", "wan/downstream_max_mbit", "Mbit/s", "mdi:download-network"),
@@ -703,28 +750,33 @@ def run() -> None:
                 calls = []
             try:
                 all_phonebook_ids = fritz.get_phonebook_ids()
-                selected_phonebook_ids = selected_phonebooks(options.phonebooks, all_phonebook_ids)
             except Exception as exc:
                 LOG.info("Phonebooks not available or not readable: %s", exc)
-                selected_phonebook_ids = []
-            phonebooks = []
-            for phonebook_id in selected_phonebook_ids:
+                all_phonebook_ids = []
+            all_phonebooks = []
+            for phonebook_id in all_phonebook_ids:
                 try:
-                    phonebooks.append(fritz.get_phonebook_info(phonebook_id))
+                    all_phonebooks.append(fritz.get_phonebook_info(phonebook_id))
                 except Exception as exc:
                     LOG.info("Phonebook %s not available or not readable: %s", phonebook_id, exc)
+            selected_phonebook_ids = selected_phonebooks(
+                publisher.selected_phonebook,
+                [phonebook.phonebook_id for phonebook in all_phonebooks],
+            )
+            phonebooks = [phonebook for phonebook in all_phonebooks if phonebook.phonebook_id in selected_phonebook_ids]
             call_views = selected_call_views(options.call_lists)
             present_tam = {info.index for info in tam_infos}
             present_wlan = {info.index for info in wlan_infos}
             present_phonebooks = {phonebook.phonebook_id for phonebook in phonebooks}
-            publisher.publish_discovery(present_tam, present_wlan, call_views, present_phonebooks)
-            publisher.publish_states(tam_infos, wlan_infos, fritz.get_wan_common(), calls, call_views, phonebooks)
+            publisher.publish_discovery(present_tam, present_wlan, call_views, present_phonebooks, all_phonebooks)
+            publisher.publish_states(tam_infos, wlan_infos, fritz.get_wan_common(), calls, call_views, phonebooks, all_phonebooks)
             LOG.info(
-                "Published %s answering machines, %s WLAN services, %s call views, %s phonebooks and WAN state",
+                "Published %s answering machines, %s WLAN services, %s call views, %s selected phonebooks, %s listed phonebooks and WAN state",
                 len(tam_infos),
                 len(wlan_infos),
                 len(call_views),
                 len(phonebooks),
+                len(all_phonebooks),
             )
             stop_event.wait(options.poll_interval)
     finally:
@@ -778,11 +830,44 @@ def selected_call_views(value: str) -> set[str]:
 
 
 def selected_phonebooks(value: str, available_ids: list[str]) -> list[str]:
-    requested = [item.strip() for item in value.split(",") if item.strip()]
+    requested = [phonebook_selection_value(item) for item in value.split(",") if item.strip()]
     if not requested or any(item.lower() == "all" for item in requested):
         return available_ids
     available = set(available_ids)
     return [item for item in requested if item in available]
+
+
+def phonebook_select_options(phonebooks: list[PhonebookInfo]) -> list[str]:
+    return ["Alle Telefonbücher"] + [phonebook_option_label(phonebook) for phonebook in phonebooks]
+
+
+def phonebook_option_label(phonebook: PhonebookInfo) -> str:
+    return f"{phonebook.phonebook_id}: {phonebook.name}"
+
+
+def phonebook_selection_label(value: str, phonebooks: list[PhonebookInfo]) -> str:
+    selection = phonebook_selection_value(value)
+    if selection == "all":
+        return "Alle Telefonbücher"
+    for phonebook in phonebooks:
+        if phonebook.phonebook_id == selection:
+            return phonebook_option_label(phonebook)
+    return value
+
+
+def phonebook_selection_value(value: str) -> str:
+    normalized = value.strip()
+    if not normalized or normalized.lower() in {"all", "alle", "alle telefonbücher", "alle telefonbuecher"}:
+        return "all"
+    return normalized.split(":", 1)[0].strip()
+
+
+def phonebook_summary(phonebook: PhonebookInfo) -> dict[str, Any]:
+    return {
+        "id": phonebook.phonebook_id,
+        "name": phonebook.name,
+        "contacts": len(phonebook.contacts),
+    }
 
 
 def call_to_dict(call: CallEntry) -> dict[str, str]:
