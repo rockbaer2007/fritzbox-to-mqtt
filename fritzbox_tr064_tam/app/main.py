@@ -275,6 +275,8 @@ class FritzBoxTr064Client:
 
         self._read_wan_connection_status(result, WAN_PPP_SERVICE, "/upnp/control/wanpppconn1")
         if not result.get("box_ppp_connect") or not result.get("ipv4_extern"):
+            self._read_wan_connection_status(result, WAN_IP_SERVICE, "/upnp/control/wanipconn1")
+        if not result.get("box_ppp_connect") or not result.get("ipv4_extern"):
             self._read_wan_connection_status(result, WAN_IP_SERVICE, "/upnp/control/wanipconnection1")
 
         try:
@@ -920,7 +922,6 @@ class HomeAssistantMqttPublisher:
             ("box_ppp_connect", "Box PPP Verbindung", "box/ppp_connect", "mdi:wan"),
             ("ipv4_extern", "IPv4 extern", "box/ipv4_extern", "mdi:ip-network"),
             ("ipv6_extern", "IPv6 extern", "box/ipv6_extern", "mdi:ip-network-outline"),
-            ("box_dns_over_tls", "Box DNS over TLS", "box/dns_over_tls", "mdi:dns"),
         ]
         for object_id, name, state_path, icon in sensors:
             self._publish_config("sensor", object_id, {
@@ -930,6 +931,20 @@ class HomeAssistantMqttPublisher:
                 "icon": icon,
                 "device": self._device(),
             })
+        self._publish(
+            f"{self.options.discovery_prefix}/sensor/fritzbox_tr064/box_dns_over_tls/config",
+            "",
+            retain=True,
+        )
+        self._publish_config("binary_sensor", "box_dns_over_tls", {
+            "name": "Box DNS over TLS",
+            "unique_id": "fritzbox_tr064_box_dns_over_tls",
+            "state_topic": f"{self.options.base_topic}/box/dns_over_tls",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:dns",
+            "device": self._device(),
+        })
         self._publish_config("binary_sensor", "box_dect", {
             "name": "Box DECT",
             "unique_id": "fritzbox_tr064_box_dect",
@@ -966,12 +981,16 @@ class HomeAssistantMqttPublisher:
             ("box_ppp_connect", "box/ppp_connect"),
             ("ipv4_extern", "box/ipv4_extern"),
             ("ipv6_extern", "box/ipv6_extern"),
-            ("box_dns_over_tls", "box/dns_over_tls"),
         ]:
-            value = status.get(key)
-            self._publish(f"{self.options.base_topic}/{path}", "" if value is None else str(value))
+            value = status.get(key) or "unknown"
+            self._publish(f"{self.options.base_topic}/{path}", str(value))
         if "box_dect" in status:
             self._publish(f"{self.options.base_topic}/box/dect", "ON" if status.get("box_dect") else "OFF")
+        dns_over_tls = status.get("box_dns_over_tls")
+        if isinstance(dns_over_tls, bool):
+            self._publish(f"{self.options.base_topic}/box/dns_over_tls", "ON" if dns_over_tls else "OFF")
+        else:
+            self._publish(f"{self.options.base_topic}/box/dns_over_tls", "")
 
     def _publish_wan_discovery(self) -> None:
         sensors = [
