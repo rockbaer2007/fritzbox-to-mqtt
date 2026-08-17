@@ -1,5 +1,7 @@
 # FRITZ!Box to MQTT
 
+![FRITZ!Box to MQTT icon](./fritzbox_tr064_tam/icon.png)
+
 Home Assistant app repository for publishing FRITZ!Box data to Home Assistant through MQTT Discovery.
 
 The app combines FRITZ!Box TR-064 calls, FRITZ!Box web/Lua fallbacks and the live call monitor on port `1012`. It creates MQTT Discovery entities for answering machines, WLAN switches, WAN state, call lists, phonebooks, live call events and optional DECT handset details.
@@ -48,6 +50,7 @@ This project is a Home Assistant Supervisor app, not a HACS custom integration o
 ## App
 
 The app lives in [`fritzbox_tr064_tam`](./fritzbox_tr064_tam). The folder and some unique IDs intentionally keep the original internal name for upgrade compatibility.
+Editable icon sources live in [`assets`](./assets).
 
 ## License
 

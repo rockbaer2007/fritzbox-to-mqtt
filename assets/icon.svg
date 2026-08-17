@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">FRITZ!Box to MQTT icon</title>
+  <desc id="desc">Original F exclamation mark symbol with MQTT network nodes.</desc>
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e94141"/>
+      <stop offset="1" stop-color="#9f1239"/>
+    </linearGradient>
+    <linearGradient id="mqtt" x1="246" y1="206" x2="430" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#39d98a"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+  </defs>
+  <rect x="40" y="40" width="432" height="432" rx="96" fill="url(#bg)"/>
+  <path d="M130 140h174v56H196v55h96v56h-96v104h-66z" fill="#fff"/>
+  <rect x="326" y="140" width="58" height="174" rx="29" fill="#fff"/>
+  <circle cx="355" cy="384" r="33" fill="#fff"/>
+  <path d="M284 308h72m0 0 52-52m-52 52 52 52" fill="none" stroke="url(#mqtt)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="284" cy="308" r="24" fill="#11263a" stroke="#39d98a" stroke-width="16"/>
+  <circle cx="408" cy="256" r="24" fill="#11263a" stroke="#39d98a" stroke-width="16"/>
+  <circle cx="408" cy="360" r="24" fill="#11263a" stroke="#0ea5e9" stroke-width="16"/>
+</svg>

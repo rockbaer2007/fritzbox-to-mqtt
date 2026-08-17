@@ -1,8 +1,15 @@
 # FRITZ!Box to MQTT
 
+![FRITZ!Box to MQTT icon](./icon.png)
+
 Home Assistant app for reading FRITZ!Box data and live call events and publishing the result through MQTT Discovery.
 
 It creates entities for detected answering machines only. The entity names use `AB0` to `AB4`; the FRITZ!Box answering machine name is exposed only as an attribute.
+
+## App Icon
+
+The Home Assistant app icon and logo are provided as `icon.png` and `logo.png`.
+Editable SVG sources live in [`../assets`](../assets).
 
 ## Entities
 

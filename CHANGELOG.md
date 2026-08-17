@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.31
+
+- Added app icon and logo assets for the Home Assistant app store and repository documentation.
+
 ## 0.1.30
 
 - Display WLAN status and WAN link status sensors as `Ein`/`Aus` instead of raw FRITZ!Box values such as `Up` or `Disabled`.

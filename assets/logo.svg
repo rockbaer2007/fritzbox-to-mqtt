@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 320" role="img" aria-labelledby="title desc">
+  <title id="title">FRITZ!Box to MQTT logo</title>
+  <desc id="desc">FRITZ!Box to MQTT wordmark with original F exclamation mark icon.</desc>
+  <rect width="960" height="320" rx="48" fill="#111827"/>
+  <g transform="translate(48 48) scale(.44)">
+    <rect x="40" y="40" width="432" height="432" rx="96" fill="#dc2626"/>
+    <path d="M130 140h174v56H196v55h96v56h-96v104h-66z" fill="#fff"/>
+    <rect x="326" y="140" width="58" height="174" rx="29" fill="#fff"/>
+    <circle cx="355" cy="384" r="33" fill="#fff"/>
+    <path d="M284 308h72m0 0 52-52m-52 52 52 52" fill="none" stroke="#22c55e" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="284" cy="308" r="24" fill="#111827" stroke="#22c55e" stroke-width="16"/>
+    <circle cx="408" cy="256" r="24" fill="#111827" stroke="#22c55e" stroke-width="16"/>
+    <circle cx="408" cy="360" r="24" fill="#111827" stroke="#38bdf8" stroke-width="16"/>
+  </g>
+  <text x="300" y="136" fill="#f9fafb" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700">FRITZ!Box</text>
+  <text x="300" y="212" fill="#38bdf8" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="700">to MQTT</text>
+</svg>
