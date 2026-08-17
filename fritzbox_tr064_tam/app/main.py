@@ -20,6 +20,7 @@ LOG = logging.getLogger("fritzbox_tr064_tam")
 SOAP_ENV = "http://schemas.xmlsoap.org/soap/envelope/"
 TAM_SERVICE = "urn:dslforum-org:service:X_AVM-DE_TAM:1"
 WAN_COMMON_SERVICE = "urn:dslforum-org:service:WANCommonInterfaceConfig:1"
+WLAN_SERVICE_TEMPLATE = "urn:dslforum-org:service:WLANConfiguration:{index}"
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class Options:
     base_topic: str
     poll_interval: int
     max_tam: int
+    max_wlan: int
     retain: bool
 
 
@@ -49,6 +51,14 @@ class TamInfo:
     name: str
     new_messages: int
     old_messages: int
+
+
+@dataclass(frozen=True)
+class WlanInfo:
+    index: int
+    enabled: bool
+    status: str
+    ssid: str
 
 
 class FritzBoxTr064Client:
@@ -79,6 +89,28 @@ class FritzBoxTr064Client:
             TAM_SERVICE,
             "SetEnable",
             {"NewIndex": index, "NewEnable": 1 if enabled else 0},
+        )
+
+    def get_wlan_info(self, index: int) -> WlanInfo:
+        info = self._soap(
+            f"/upnp/control/wlanconfig{index}",
+            WLAN_SERVICE_TEMPLATE.format(index=index),
+            "GetInfo",
+            {},
+        )
+        return WlanInfo(
+            index=index,
+            enabled=as_bool(info.get("NewEnable")),
+            status=str(info.get("NewStatus", "")).strip() or "unknown",
+            ssid=str(info.get("NewSSID", "")).strip(),
+        )
+
+    def set_wlan_enabled(self, index: int, enabled: bool) -> None:
+        self._soap(
+            f"/upnp/control/wlanconfig{index}",
+            WLAN_SERVICE_TEMPLATE.format(index=index),
+            "SetEnable",
+            {"NewEnable": 1 if enabled else 0},
         )
 
     def get_wan_common(self) -> dict[str, Any]:
@@ -176,6 +208,7 @@ class HomeAssistantMqttPublisher:
         if options.mqtt_username:
             self.client.username_pw_set(options.mqtt_username, options.mqtt_password)
         self.known_tam_indices: set[int] = set()
+        self.known_wlan_indices: set[int] = set()
 
     def start(self) -> None:
         self.client.on_connect = self._on_connect
@@ -187,16 +220,22 @@ class HomeAssistantMqttPublisher:
         self.client.loop_stop()
         self.client.disconnect()
 
-    def publish_discovery(self, present_indices: set[int]) -> None:
+    def publish_discovery(self, present_tam_indices: set[int], present_wlan_indices: set[int]) -> None:
         for index in range(self.options.max_tam):
-            if index in present_indices:
+            if index in present_tam_indices:
                 self._publish_tam_discovery(index)
             else:
                 self._remove_tam_discovery(index)
+        for index in range(1, self.options.max_wlan + 1):
+            if index in present_wlan_indices:
+                self._publish_wlan_discovery(index)
+            else:
+                self._remove_wlan_discovery(index)
         self._publish_wan_discovery()
-        self.known_tam_indices = set(present_indices)
+        self.known_tam_indices = set(present_tam_indices)
+        self.known_wlan_indices = set(present_wlan_indices)
 
-    def publish_states(self, tam_infos: list[TamInfo], wan: dict[str, Any]) -> None:
+    def publish_states(self, tam_infos: list[TamInfo], wlan_infos: list[WlanInfo], wan: dict[str, Any]) -> None:
         for info in tam_infos:
             prefix = f"{self.options.base_topic}/ab/{info.index}"
             self._publish(f"{prefix}/new_messages", str(info.new_messages))
@@ -204,6 +243,12 @@ class HomeAssistantMqttPublisher:
             self._publish(f"{prefix}/enabled", "ON" if info.enabled else "OFF")
             self._publish(f"{prefix}/running", "ON" if info.running else "OFF")
             self._publish_json(f"{prefix}/attributes", {"ab_index": info.index, "ab_name": info.name})
+
+        for info in wlan_infos:
+            prefix = f"{self.options.base_topic}/wlan/{info.index}"
+            self._publish(f"{prefix}/enabled", "ON" if info.enabled else "OFF")
+            self._publish(f"{prefix}/status", info.status)
+            self._publish_json(f"{prefix}/attributes", {"wlan_index": info.index, "ssid": info.ssid})
 
         if "upstream_max_bps" in wan:
             self._publish(f"{self.options.base_topic}/wan/upstream_max_mbit", format_mbit(wan["upstream_max_bps"]))
@@ -219,10 +264,18 @@ class HomeAssistantMqttPublisher:
     def _on_connect(self, client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any) -> None:
         LOG.info("Connected to MQTT broker with result %s", reason_code)
         client.subscribe(f"{self.options.base_topic}/ab/+/enabled/set")
+        client.subscribe(f"{self.options.base_topic}/wlan/+/enabled/set")
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         topic = message.topic
         payload = message.payload.decode("utf-8", errors="replace").strip().upper()
+        if topic.startswith(f"{self.options.base_topic}/ab/") and topic.endswith("/enabled/set"):
+            self._handle_tam_command(topic, payload)
+            return
+        if topic.startswith(f"{self.options.base_topic}/wlan/") and topic.endswith("/enabled/set"):
+            self._handle_wlan_command(topic, payload)
+
+    def _handle_tam_command(self, topic: str, payload: str) -> None:
         marker = f"{self.options.base_topic}/ab/"
         if not topic.startswith(marker) or not topic.endswith("/enabled/set"):
             return
@@ -241,6 +294,24 @@ class HomeAssistantMqttPublisher:
             self._publish(f"{self.options.base_topic}/ab/{index}/enabled", "ON" if enabled else "OFF")
         except Exception as exc:
             LOG.error("Could not set AB%s enabled state: %s", index, exc)
+
+    def _handle_wlan_command(self, topic: str, payload: str) -> None:
+        marker = f"{self.options.base_topic}/wlan/"
+        try:
+            index = int(topic[len(marker):].split("/", 1)[0])
+        except ValueError:
+            LOG.warning("Ignoring invalid WLAN command topic: %s", topic)
+            return
+        if index < 1 or index > self.options.max_wlan:
+            LOG.warning("Ignoring WLAN command for unsupported index %s", index)
+            return
+        enabled = payload in {"ON", "1", "TRUE"}
+        LOG.info("Setting WLAN%s enabled=%s", index, enabled)
+        try:
+            self.fritz.set_wlan_enabled(index, enabled)
+            self._publish(f"{self.options.base_topic}/wlan/{index}/enabled", "ON" if enabled else "OFF")
+        except Exception as exc:
+            LOG.error("Could not set WLAN%s enabled state: %s", index, exc)
 
     def _publish_tam_discovery(self, index: int) -> None:
         prefix = f"{self.options.base_topic}/ab/{index}"
@@ -292,7 +363,40 @@ class HomeAssistantMqttPublisher:
             ("binary_sensor", "running"),
         ]:
             self._publish(
-                f"{self.options.discovery_prefix}/{component}/fritzbox_tr064_ab/ab{index}_{suffix}/config",
+                f"{self.options.discovery_prefix}/{component}/fritzbox_tr064/ab{index}_{suffix}/config",
+                "",
+                retain=True,
+            )
+
+    def _publish_wlan_discovery(self, index: int) -> None:
+        prefix = f"{self.options.base_topic}/wlan/{index}"
+        self._publish_config("switch", f"wlan{index}_enabled", {
+            "name": f"WLAN{index} Ein/Aus",
+            "unique_id": f"fritzbox_tr064_wlan{index}_enabled",
+            "state_topic": f"{prefix}/enabled",
+            "command_topic": f"{prefix}/enabled/set",
+            "json_attributes_topic": f"{prefix}/attributes",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:wifi",
+            "device": self._device(),
+        })
+        self._publish_config("sensor", f"wlan{index}_status", {
+            "name": f"WLAN{index} Status",
+            "unique_id": f"fritzbox_tr064_wlan{index}_status",
+            "state_topic": f"{prefix}/status",
+            "json_attributes_topic": f"{prefix}/attributes",
+            "icon": "mdi:wifi-settings",
+            "device": self._device(),
+        })
+
+    def _remove_wlan_discovery(self, index: int) -> None:
+        for component, suffix in [
+            ("switch", "enabled"),
+            ("sensor", "status"),
+        ]:
+            self._publish(
+                f"{self.options.discovery_prefix}/{component}/fritzbox_tr064/wlan{index}_{suffix}/config",
                 "",
                 retain=True,
             )
@@ -323,7 +427,7 @@ class HomeAssistantMqttPublisher:
         })
 
     def _publish_config(self, component: str, object_id: str, payload: dict[str, Any]) -> None:
-        topic = f"{self.options.discovery_prefix}/{component}/fritzbox_tr064_ab/{object_id}/config"
+        topic = f"{self.options.discovery_prefix}/{component}/fritzbox_tr064/{object_id}/config"
         self._publish_json(topic, payload, retain=True)
 
     def _publish_json(self, topic: str, payload: dict[str, Any], retain: bool | None = None) -> None:
@@ -356,6 +460,7 @@ def run() -> None:
     try:
         while not stop_event.is_set():
             tam_infos: list[TamInfo] = []
+            wlan_infos: list[WlanInfo] = []
             for index in range(options.max_tam):
                 try:
                     info = fritz.get_tam_info(index)
@@ -363,10 +468,20 @@ def run() -> None:
                         tam_infos.append(info)
                 except Exception as exc:
                     LOG.info("AB%s not available or not readable: %s", index, exc)
-            present = {info.index for info in tam_infos}
-            publisher.publish_discovery(present)
-            publisher.publish_states(tam_infos, fritz.get_wan_common())
-            LOG.info("Published %s answering machines and WAN state", len(tam_infos))
+            for index in range(1, options.max_wlan + 1):
+                try:
+                    wlan_infos.append(fritz.get_wlan_info(index))
+                except Exception as exc:
+                    LOG.info("WLAN%s not available or not readable: %s", index, exc)
+            present_tam = {info.index for info in tam_infos}
+            present_wlan = {info.index for info in wlan_infos}
+            publisher.publish_discovery(present_tam, present_wlan)
+            publisher.publish_states(tam_infos, wlan_infos, fritz.get_wan_common())
+            LOG.info(
+                "Published %s answering machines, %s WLAN services and WAN state",
+                len(tam_infos),
+                len(wlan_infos),
+            )
             stop_event.wait(options.poll_interval)
     finally:
         publisher.stop()
@@ -404,6 +519,7 @@ def load_options() -> Options:
         base_topic=str(raw.get("base_topic", "fritzbox/tr064")).strip("/"),
         poll_interval=int(raw.get("poll_interval", 60)),
         max_tam=max(1, min(5, int(raw.get("max_tam", 5)))),
+        max_wlan=max(1, min(5, int(raw.get("max_wlan", 4)))),
         retain=bool(raw.get("retain", True)),
     )
 

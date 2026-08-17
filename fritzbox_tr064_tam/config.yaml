@@ -26,6 +26,7 @@ options:
   base_topic: fritzbox/tr064
   poll_interval: 60
   max_tam: 5
+  max_wlan: 4
   retain: true
 schema:
   fritz_host: str
@@ -41,4 +42,5 @@ schema:
   base_topic: str
   poll_interval: int(15,)
   max_tam: int(1,5)
+  max_wlan: int(1,5)
   retain: bool

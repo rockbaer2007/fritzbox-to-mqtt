@@ -21,6 +21,13 @@ WAN entities:
 - `Uploadrate`
 - `WAN Link Status`
 
+Detected WLAN services:
+
+- `WLAN1 Ein/Aus`
+- `WLAN1 Status`
+
+The SSID is exposed as an attribute and is not used as the entity name.
+
 ## Requirements
 
 - TR-064 enabled on the FRITZ!Box.
