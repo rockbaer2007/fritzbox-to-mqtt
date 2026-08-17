@@ -82,8 +82,8 @@ user: homeassistant
 password: secret
 call_lists: all,incoming,outgoing,missed
 phonebooks: all
-phonebook_names: ""
-phonebook_name_excludes: tellows
+phonebook_names: 3:tellows Sperrliste 7,4:tellows Sperrliste 8-9
+phonebook_name_excludes: ""
 call_monitor_enabled: true
 call_monitor_port: 1012
 max_calls: 20
@@ -92,4 +92,5 @@ max_calls: 20
 MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.
 `phonebooks` is the startup selection; after the first successful scan, use the `Telefonbuch Anzeige` select entity in Home Assistant.
 `phonebook_names` can override generic FRITZ!Box names, for example `1:Privat,3:Firma`.
+The default maps phonebook `3` to `tellows Sperrliste 7` and phonebook `4` to `tellows Sperrliste 8-9`.
 `phonebook_name_excludes` hides matching FRITZ!Box phonebook names from the list, for example `tellows`.
