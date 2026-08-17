@@ -11,7 +11,9 @@ For each detected answering machine:
 - `AB0 Neue Nachrichten`
 - `AB0 Alte Nachrichten`
 - `AB0 Ein/Aus`
-- `AB0 Aktiv`
+- `AB0 Status`
+
+The AB status follows the FRITZ!Box `NewEnable` value. The raw `NewTAMRunning` and `NewStatus` values are exposed as attributes for diagnostics.
 
 WAN entities:
 
@@ -34,8 +36,7 @@ Phonebook entities, depending on `phonebooks`:
 
 - `Telefonbücher`
 - `Telefonbuch Anzeige`
-- `Telefonbuch 0`
-- `Telefonbuch 1`
+- detected FRITZ!Box phonebooks by their FRITZ!Box names
 - further detected FRITZ!Box phonebooks
 
 `Telefonbücher` lists all detected FRITZ!Box phonebooks in its attributes.

@@ -69,6 +69,7 @@ class TamInfo:
     present: bool
     enabled: bool
     running: bool
+    status: str
     name: str
     new_messages: int
     old_messages: int
@@ -138,7 +139,7 @@ class FritzBoxTr064Client:
             LOG.debug("Could not read AB%s message list: %s", index, exc)
             new_messages, old_messages = 0, 0
         present = bool(name) or status not in {"", "not_found", "unknown"} or new_messages > 0 or old_messages > 0
-        return TamInfo(index, present, enabled, running, name, new_messages, old_messages)
+        return TamInfo(index, present, enabled, running, status, name, new_messages, old_messages)
 
     def set_tam_enabled(self, index: int, enabled: bool) -> None:
         self._soap(
@@ -363,8 +364,10 @@ class HomeAssistantMqttPublisher:
             self._publish_call_discovery(view)
         for view in self.known_call_views - call_views:
             self._remove_call_discovery(view)
+        phonebooks_by_id = {phonebook.phonebook_id: phonebook for phonebook in all_phonebooks}
         for phonebook_id in phonebook_ids:
-            self._publish_phonebook_discovery(phonebook_id)
+            fallback = PhonebookInfo(phonebook_id, f"Telefonbuch {phonebook_id}", [])
+            self._publish_phonebook_discovery(phonebooks_by_id.get(phonebook_id, fallback))
         for phonebook_id in self.known_phonebook_ids - phonebook_ids:
             self._remove_phonebook_discovery(phonebook_id)
         self._publish_phonebook_overview_discovery()
@@ -390,8 +393,14 @@ class HomeAssistantMqttPublisher:
             self._publish(f"{prefix}/new_messages", str(info.new_messages))
             self._publish(f"{prefix}/old_messages", str(info.old_messages))
             self._publish(f"{prefix}/enabled", "ON" if info.enabled else "OFF")
-            self._publish(f"{prefix}/running", "ON" if info.running else "OFF")
-            self._publish_json(f"{prefix}/attributes", {"ab_index": info.index, "ab_name": info.name})
+            self._publish(f"{prefix}/running", "ON" if info.enabled else "OFF")
+            self._publish_json(f"{prefix}/attributes", {
+                "ab_index": info.index,
+                "ab_name": info.name,
+                "tam_enabled": info.enabled,
+                "tam_running": info.running,
+                "tam_status": info.status,
+            })
 
         for info in wlan_infos:
             slug = wlan_slug(info.index)
@@ -536,7 +545,7 @@ class HomeAssistantMqttPublisher:
             "device": self._device(),
         })
         self._publish_config("binary_sensor", f"ab{index}_running", {
-            "name": f"AB{index} Aktiv",
+            "name": f"AB{index} Status",
             "unique_id": f"fritzbox_tr064_ab{index}_running",
             "state_topic": f"{prefix}/running",
             "json_attributes_topic": f"{prefix}/attributes",
@@ -627,11 +636,11 @@ class HomeAssistantMqttPublisher:
             retain=True,
         )
 
-    def _publish_phonebook_discovery(self, phonebook_id: str) -> None:
-        object_part = safe_object_part(phonebook_id)
+    def _publish_phonebook_discovery(self, phonebook: PhonebookInfo) -> None:
+        object_part = safe_object_part(phonebook.phonebook_id)
         prefix = f"{self.options.base_topic}/phonebook/{object_part}"
         self._publish_config("sensor", f"phonebook_{object_part}", {
-            "name": f"Telefonbuch {phonebook_id}",
+            "name": phonebook.name or f"Telefonbuch {phonebook.phonebook_id}",
             "unique_id": f"fritzbox_tr064_phonebook_{object_part}",
             "state_topic": f"{prefix}/count",
             "json_attributes_topic": f"{prefix}/attributes",
