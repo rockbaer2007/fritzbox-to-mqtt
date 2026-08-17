@@ -547,11 +547,11 @@ def load_options() -> Options:
             "mqtt_password": os.getenv("MQTT_PASSWORD", ""),
         }
     return Options(
-        fritz_host=str(raw.get("fritz_host", "fritz.box")),
-        fritz_port=int(raw.get("fritz_port", 49000)),
+        fritz_host=str(raw.get("ip", raw.get("fritz_host", "fritz.box"))),
+        fritz_port=int(raw.get("port", raw.get("fritz_port", 49000))),
         fritz_ssl=bool(raw.get("fritz_ssl", False)),
-        fritz_username=str(raw.get("fritz_username", "")),
-        fritz_password=str(raw.get("fritz_password", "")),
+        fritz_username=str(raw.get("user", raw.get("fritz_username", ""))),
+        fritz_password=str(raw.get("password", raw.get("fritz_password", ""))),
         mqtt_host=str(raw.get("mqtt_host", "core-mosquitto")),
         mqtt_port=int(raw.get("mqtt_port", 1883)),
         mqtt_username=str(raw.get("mqtt_username", "")),

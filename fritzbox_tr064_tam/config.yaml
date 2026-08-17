@@ -13,34 +13,12 @@ startup: services
 boot: auto
 init: false
 options:
-  fritz_host: fritz.box
-  fritz_port: 49000
-  fritz_ssl: false
-  fritz_username: ""
-  fritz_password: ""
-  mqtt_host: core-mosquitto
-  mqtt_port: 1883
-  mqtt_username: ""
-  mqtt_password: ""
-  discovery_prefix: homeassistant
-  base_topic: fritzbox/tr064
-  poll_interval: 60
-  max_tam: 5
-  max_wlan: 4
-  retain: true
+  ip: fritz.box
+  port: 49000
+  user: ""
+  password: ""
 schema:
-  fritz_host: str
-  fritz_port: port
-  fritz_ssl: bool
-  fritz_username: str
-  fritz_password: password
-  mqtt_host: str
-  mqtt_port: port
-  mqtt_username: str
-  mqtt_password: password
-  discovery_prefix: str
-  base_topic: str
-  poll_interval: int(15,)
-  max_tam: int(1,5)
-  max_wlan: int(1,5)
-  retain: bool
+  ip: str
+  port: port
+  user: str
+  password: password

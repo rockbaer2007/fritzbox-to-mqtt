@@ -38,3 +38,14 @@ The SSID is exposed as an attribute and is not used as the entity name.
 - A FRITZ!Box user with sufficient rights for telephony/TAM and network status.
 - MQTT broker reachable from the add-on.
 - MQTT integration with discovery enabled in Home Assistant.
+
+## Add-on Configuration
+
+The visible configuration mask contains only:
+
+```yaml
+ip: fritz.box
+port: 49000
+user: homeassistant
+password: secret
+```
