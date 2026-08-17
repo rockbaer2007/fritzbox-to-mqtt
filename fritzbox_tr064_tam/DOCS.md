@@ -13,8 +13,8 @@ max_calls: 20
 ```
 
 The visible Home Assistant add-on configuration asks for the FRITZ!Box connection and display choices.
-MQTT discovery uses the Home Assistant defaults internally:
-`core-mosquitto`, port `1883`, discovery prefix `homeassistant`, base topic `fritzbox/tr064`, polling every 60 seconds, up to five answering machines and up to four WLAN services.
+MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.
+MQTT discovery uses the prefix `homeassistant`, base topic `fritzbox/tr064`, polling every 60 seconds, up to five answering machines and up to four WLAN services.
 
 `call_lists` is a comma-separated selection of:
 

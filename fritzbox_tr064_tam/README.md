@@ -53,7 +53,7 @@ The SSID is exposed as an attribute and is not used as the entity name.
 
 - TR-064 enabled on the FRITZ!Box.
 - A FRITZ!Box user with sufficient rights for telephony/TAM and network status.
-- MQTT broker reachable from the add-on.
+- MQTT broker installed as Home Assistant add-on/app.
 - MQTT integration with discovery enabled in Home Assistant.
 
 ## Add-on Configuration
@@ -69,3 +69,5 @@ call_lists: all,incoming,outgoing,missed
 phonebooks: all
 max_calls: 20
 ```
+
+MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.

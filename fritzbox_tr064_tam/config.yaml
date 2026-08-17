@@ -12,6 +12,8 @@ arch:
 startup: services
 boot: auto
 init: false
+services:
+  - mqtt:need
 options:
   ip: fritz.box
   port: 49000
