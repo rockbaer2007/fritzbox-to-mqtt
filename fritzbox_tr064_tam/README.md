@@ -97,6 +97,8 @@ The SSID is exposed as an attribute and is not used as the entity name.
 
 A Mushroom status card example is available in [`../examples/mushroom-status-card.yaml`](../examples/mushroom-status-card.yaml).
 
+![FRITZ!Box to MQTT Mushroom status card](../examples/fritzbox-to-mqtt.png)
+
 ## Requirements
 
 - TR-064 enabled on the FRITZ!Box.

@@ -43,6 +43,8 @@ This project is a Home Assistant Supervisor app, not a HACS custom integration o
 
 - [Mushroom status card](./examples/mushroom-status-card.yaml) for WAN rates, answering machines and WLAN status.
 
+![FRITZ!Box to MQTT Mushroom status card](./examples/fritzbox-to-mqtt.png)
+
 ## App
 
 The app lives in [`fritzbox_tr064_tam`](./fritzbox_tr064_tam). The folder and some unique IDs intentionally keep the original internal name for upgrade compatibility.
