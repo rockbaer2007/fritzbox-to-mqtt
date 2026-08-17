@@ -21,6 +21,11 @@ SOAP_ENV = "http://schemas.xmlsoap.org/soap/envelope/"
 TAM_SERVICE = "urn:dslforum-org:service:X_AVM-DE_TAM:1"
 WAN_COMMON_SERVICE = "urn:dslforum-org:service:WANCommonInterfaceConfig:1"
 WLAN_SERVICE_TEMPLATE = "urn:dslforum-org:service:WLANConfiguration:{index}"
+WLAN_ROLES = {
+    1: ("wlan2_4", "WLAN 2.4 GHz"),
+    2: ("wlan5", "WLAN 5 GHz"),
+    3: ("wlanguest", "WLAN Gast"),
+}
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,23 @@ class WlanInfo:
     enabled: bool
     status: str
     ssid: str
+
+
+def wlan_slug(index: int) -> str:
+    return WLAN_ROLES.get(index, (f"wlan_service_{index}", f"WLAN{index}"))[0]
+
+
+def wlan_label(index: int) -> str:
+    return WLAN_ROLES.get(index, (f"wlan_service_{index}", f"WLAN{index}"))[1]
+
+
+def wlan_index_from_slug(value: str) -> int | None:
+    if value.isdigit():
+        return int(value)
+    for index, (slug, _label) in WLAN_ROLES.items():
+        if value == slug:
+            return index
+    return None
 
 
 class FritzBoxTr064Client:
@@ -245,10 +267,14 @@ class HomeAssistantMqttPublisher:
             self._publish_json(f"{prefix}/attributes", {"ab_index": info.index, "ab_name": info.name})
 
         for info in wlan_infos:
-            prefix = f"{self.options.base_topic}/wlan/{info.index}"
+            slug = wlan_slug(info.index)
+            prefix = f"{self.options.base_topic}/wlan/{slug}"
             self._publish(f"{prefix}/enabled", "ON" if info.enabled else "OFF")
             self._publish(f"{prefix}/status", info.status)
-            self._publish_json(f"{prefix}/attributes", {"wlan_index": info.index, "ssid": info.ssid})
+            self._publish_json(
+                f"{prefix}/attributes",
+                {"wlan_index": info.index, "wlan_slug": slug, "ssid": info.ssid},
+            )
 
         if "upstream_max_bps" in wan:
             self._publish(f"{self.options.base_topic}/wan/upstream_max_mbit", format_mbit(wan["upstream_max_bps"]))
@@ -297,21 +323,21 @@ class HomeAssistantMqttPublisher:
 
     def _handle_wlan_command(self, topic: str, payload: str) -> None:
         marker = f"{self.options.base_topic}/wlan/"
-        try:
-            index = int(topic[len(marker):].split("/", 1)[0])
-        except ValueError:
+        slug = topic[len(marker):].split("/", 1)[0]
+        index = wlan_index_from_slug(slug)
+        if index is None:
             LOG.warning("Ignoring invalid WLAN command topic: %s", topic)
             return
         if index < 1 or index > self.options.max_wlan:
             LOG.warning("Ignoring WLAN command for unsupported index %s", index)
             return
         enabled = payload in {"ON", "1", "TRUE"}
-        LOG.info("Setting WLAN%s enabled=%s", index, enabled)
+        LOG.info("Setting %s enabled=%s", wlan_label(index), enabled)
         try:
             self.fritz.set_wlan_enabled(index, enabled)
-            self._publish(f"{self.options.base_topic}/wlan/{index}/enabled", "ON" if enabled else "OFF")
+            self._publish(f"{self.options.base_topic}/wlan/{wlan_slug(index)}/enabled", "ON" if enabled else "OFF")
         except Exception as exc:
-            LOG.error("Could not set WLAN%s enabled state: %s", index, exc)
+            LOG.error("Could not set %s enabled state: %s", wlan_label(index), exc)
 
     def _publish_tam_discovery(self, index: int) -> None:
         prefix = f"{self.options.base_topic}/ab/{index}"
@@ -369,10 +395,13 @@ class HomeAssistantMqttPublisher:
             )
 
     def _publish_wlan_discovery(self, index: int) -> None:
-        prefix = f"{self.options.base_topic}/wlan/{index}"
-        self._publish_config("switch", f"wlan{index}_enabled", {
-            "name": f"WLAN{index} Ein/Aus",
-            "unique_id": f"fritzbox_tr064_wlan{index}_enabled",
+        slug = wlan_slug(index)
+        label = wlan_label(index)
+        prefix = f"{self.options.base_topic}/wlan/{slug}"
+        self._remove_legacy_wlan_discovery(index)
+        self._publish_config("switch", f"{slug}_enabled", {
+            "name": f"{label} Ein/Aus",
+            "unique_id": f"fritzbox_tr064_{slug}_enabled",
             "state_topic": f"{prefix}/enabled",
             "command_topic": f"{prefix}/enabled/set",
             "json_attributes_topic": f"{prefix}/attributes",
@@ -381,9 +410,9 @@ class HomeAssistantMqttPublisher:
             "icon": "mdi:wifi",
             "device": self._device(),
         })
-        self._publish_config("sensor", f"wlan{index}_status", {
-            "name": f"WLAN{index} Status",
-            "unique_id": f"fritzbox_tr064_wlan{index}_status",
+        self._publish_config("sensor", f"{slug}_status", {
+            "name": f"{label} Status",
+            "unique_id": f"fritzbox_tr064_{slug}_status",
             "state_topic": f"{prefix}/status",
             "json_attributes_topic": f"{prefix}/attributes",
             "icon": "mdi:wifi-settings",
@@ -391,6 +420,18 @@ class HomeAssistantMqttPublisher:
         })
 
     def _remove_wlan_discovery(self, index: int) -> None:
+        self._remove_legacy_wlan_discovery(index)
+        for component, suffix in [
+            ("switch", "enabled"),
+            ("sensor", "status"),
+        ]:
+            self._publish(
+                f"{self.options.discovery_prefix}/{component}/fritzbox_tr064/{wlan_slug(index)}_{suffix}/config",
+                "",
+                retain=True,
+            )
+
+    def _remove_legacy_wlan_discovery(self, index: int) -> None:
         for component, suffix in [
             ("switch", "enabled"),
             ("sensor", "status"),

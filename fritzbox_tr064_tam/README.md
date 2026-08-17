@@ -23,8 +23,12 @@ WAN entities:
 
 Detected WLAN services:
 
-- `WLAN1 Ein/Aus`
-- `WLAN1 Status`
+- `WLAN 2.4 GHz Ein/Aus` (`wlan2_4`)
+- `WLAN 2.4 GHz Status` (`wlan2_4`)
+- `WLAN 5 GHz Ein/Aus` (`wlan5`)
+- `WLAN 5 GHz Status` (`wlan5`)
+- `WLAN Gast Ein/Aus` (`wlanguest`)
+- `WLAN Gast Status` (`wlanguest`)
 
 The SSID is exposed as an attribute and is not used as the entity name.
 
