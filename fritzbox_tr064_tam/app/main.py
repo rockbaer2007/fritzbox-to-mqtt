@@ -304,7 +304,13 @@ class FritzBoxTr064Client:
             LOG.debug("Could not read WAN status %s: %s", control_url, exc)
         try:
             external = self._soap(control_url, service, "GetExternalIPAddress", {})
-            ipv4 = str(external.get("NewExternalIPAddress", "")).strip()
+            ipv4 = first_value(external, [
+                "NewExternalIPAddress",
+                "NewX_AVM-DE_ExternalIPAddress",
+                "NewX_AVM_DE_ExternalIPAddress",
+                "box_ppp_IPv4_Extern",
+                "box_IPv4_Extern",
+            ])
             if ipv4:
                 result["ipv4_extern"] = ipv4
         except Exception as exc:
@@ -315,6 +321,9 @@ class FritzBoxTr064Client:
                 "NewX_AVM-DE_ExternalIPv6Address",
                 "NewX_AVM_DE_ExternalIPv6Address",
                 "NewExternalIPv6Address",
+                "NewIPv6Address",
+                "box_IPv6_Extern",
+                "box_ppp_IPv6_Extern",
             ])
             if ipv6:
                 result["ipv6_extern"] = ipv6
@@ -920,8 +929,8 @@ class HomeAssistantMqttPublisher:
         sensors = [
             ("box_meshRole", "Box Mesh Rolle", "box/meshRole", "mdi:hubspot"),
             ("box_ppp_connect", "Box PPP Verbindung", "box/ppp_connect", "mdi:wan"),
-            ("ipv4_extern", "IPv4 extern", "box/ipv4_extern", "mdi:ip-network"),
-            ("ipv6_extern", "IPv6 extern", "box/ipv6_extern", "mdi:ip-network-outline"),
+            ("ipv4_extern", "Box PPP IPv4 Extern", "box/ipv4_extern", "mdi:ip-network"),
+            ("ipv6_extern", "Box IPv6 Extern", "box/ipv6_extern", "mdi:ip-network-outline"),
         ]
         for object_id, name, state_path, icon in sensors:
             self._publish_config("sensor", object_id, {
