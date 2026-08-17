@@ -1,5 +1,5 @@
 name: FritzBox TR-064 TAM MQTT
-version: "0.1.8"
+version: "0.1.9"
 slug: fritzbox_tr064_tam
 description: Publish FRITZ!Box answering machine and WAN data to Home Assistant via MQTT Discovery
 url: https://github.com/local/fritzbox-tr064-ha-addon
@@ -19,13 +19,14 @@ options:
   port: 49000
   user: ""
   password: ""
-  call_lists: all,incoming,outgoing,missed
+  call_lists: all,incoming,outgoing,missed,rejected,blocked
   phonebooks: all
   phonebook_names: 3:tellows Sperrliste 7,4:tellows Sperrliste 8-9
   phonebook_name_excludes: ""
   call_monitor_enabled: true
   call_monitor_port: 1012
   max_calls: 20
+  max_live_events: 20
 schema:
   ip: str
   port: port
@@ -38,3 +39,4 @@ schema:
   call_monitor_enabled: bool
   call_monitor_port: port
   max_calls: int(1,100)
+  max_live_events: int(1,100)

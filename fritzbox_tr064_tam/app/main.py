@@ -25,15 +25,20 @@ ONTEL_SERVICE = "urn:dslforum-org:service:X_AVM-DE_OnTel:1"
 WAN_COMMON_SERVICE = "urn:dslforum-org:service:WANCommonInterfaceConfig:1"
 WLAN_SERVICE_TEMPLATE = "urn:dslforum-org:service:WLANConfiguration:{index}"
 CALL_VIEW_LABELS = {
-    "all": "Alle Anrufe",
-    "incoming": "Eingehende Anrufe",
-    "outgoing": "Ausgehende Anrufe",
-    "missed": "Verpasste Anrufe",
+    "all": "Anrufliste Alle",
+    "incoming": "Anrufliste Eingehend",
+    "outgoing": "Anrufliste Ausgehend",
+    "missed": "Anrufliste Verpasst",
+    "rejected": "Anrufliste Abgewiesen",
+    "blocked": "Anrufliste Gesperrt",
+    "unknown": "Anrufliste Unbekannt",
 }
 CALL_TYPE_VIEWS = {
     "1": "incoming",
     "2": "missed",
     "3": "outgoing",
+    "9": "rejected",
+    "10": "blocked",
 }
 WLAN_ROLES = {
     1: ("wlan2_4", "WLAN 2.4 GHz"),
@@ -65,6 +70,7 @@ class Options:
     call_monitor_enabled: bool
     call_monitor_port: int
     max_calls: int
+    max_live_events: int
     retain: bool
 
 
@@ -350,6 +356,7 @@ class HomeAssistantMqttPublisher:
         self.known_call_views: set[str] = set()
         self.known_phonebook_ids: set[str] = set()
         self.selected_phonebooks = self.options.phonebooks.strip() or "all"
+        self.live_call_events: list[dict[str, str]] = []
 
     def start(self) -> None:
         self.client.on_connect = self._on_connect
@@ -440,7 +447,8 @@ class HomeAssistantMqttPublisher:
             self._publish_json(f"{prefix}/attributes", {
                 "view": view,
                 "max_calls": self.options.max_calls,
-                "calls": [call_to_dict(call) for call in visible],
+                "entries": [call_to_dict(call) for call in visible],
+                "lines": [call_to_line(call) for call in visible],
             })
 
         for phonebook in phonebooks:
@@ -477,12 +485,19 @@ class HomeAssistantMqttPublisher:
             self._publish(f"{prefix}/status", "idle")
             self._publish(f"{prefix}/ringing", "OFF")
             self._publish(f"{prefix}/last_event", "")
+            self._publish(f"{prefix}/events_count", str(len(self.live_call_events)))
+            self._publish_json(f"{prefix}/events_attributes", {"events": self.live_call_events})
             self._publish_json(f"{prefix}/attributes", {"event": "idle"})
             return
+        event_dict = call_monitor_event_to_dict(event)
+        self.live_call_events.insert(0, event_dict)
+        self.live_call_events = self.live_call_events[:self.options.max_live_events]
         self._publish(f"{prefix}/status", event.state)
         self._publish(f"{prefix}/ringing", "ON" if event.event == "RING" else "OFF")
         self._publish(f"{prefix}/last_event", event.event)
-        self._publish_json(f"{prefix}/attributes", call_monitor_event_to_dict(event))
+        self._publish(f"{prefix}/events_count", str(len(self.live_call_events)))
+        self._publish_json(f"{prefix}/events_attributes", {"events": self.live_call_events})
+        self._publish_json(f"{prefix}/attributes", event_dict)
 
     def _on_connect(self, client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any) -> None:
         LOG.info("Connected to MQTT broker with result %s", reason_code)
@@ -764,6 +779,15 @@ class HomeAssistantMqttPublisher:
             "icon": "mdi:phone-log",
             "device": self._device(),
         })
+        self._publish_config("sensor", "call_monitor_events", {
+            "name": "Anrufmonitor Verlauf",
+            "unique_id": "fritzbox_tr064_call_monitor_events",
+            "state_topic": f"{prefix}/events_count",
+            "json_attributes_topic": f"{prefix}/events_attributes",
+            "icon": "mdi:format-list-bulleted",
+            "state_class": "measurement",
+            "device": self._device(),
+        })
 
     def _publish_wan_discovery(self) -> None:
         sensors = [
@@ -973,6 +997,7 @@ def load_options() -> Options:
         call_monitor_enabled=bool(raw.get("call_monitor_enabled", True)),
         call_monitor_port=int(raw.get("call_monitor_port", 1012)),
         max_calls=max(1, min(100, int(raw.get("max_calls", 20)))),
+        max_live_events=max(1, min(100, int(raw.get("max_live_events", 20)))),
         retain=bool(raw.get("retain", True)),
     )
 
@@ -1116,6 +1141,7 @@ def call_to_dict(call: CallEntry) -> dict[str, str]:
     return {
         "type": call.view,
         "type_id": call.type_id,
+        "type_label": CALL_VIEW_LABELS.get(call.view, call.view),
         "date": call.date,
         "name": call.name,
         "caller": call.caller,
@@ -1123,6 +1149,14 @@ def call_to_dict(call: CallEntry) -> dict[str, str]:
         "number": call.number,
         "duration": call.duration,
     }
+
+
+def call_to_line(call: CallEntry) -> str:
+    label = CALL_VIEW_LABELS.get(call.view, call.view).replace("Anrufliste ", "")
+    person = call.name or call.number or "Unbekannt"
+    direction = call.caller or call.called or call.number
+    duration = f", {call.duration}" if call.duration else ""
+    return f"{call.date} | {label} | {person} | {direction}{duration}"
 
 
 def parse_call_monitor_line(line: str) -> CallMonitorEvent | None:

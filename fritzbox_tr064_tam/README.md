@@ -29,14 +29,17 @@ Call list entities, depending on `call_lists`:
 - `Eingehende Anrufe`
 - `Ausgehende Anrufe`
 - `Verpasste Anrufe`
+- `Abgewiesene Anrufe`
+- `Gesperrte Anrufe`
 
-Each call list sensor reports the total count as its state and exposes up to `max_calls` entries in the `calls` attribute.
+Each call list sensor reports the total count as its state and exposes up to `max_calls` entries in the `entries` and `lines` attributes.
 
 Live call monitor entities, if `call_monitor_enabled` is true:
 
 - `Anrufmonitor Status`
 - `Telefon klingelt`
 - `Anrufmonitor Ereignis`
+- `Anrufmonitor Verlauf`
 
 The live monitor listens on FRITZ!Box port `1012` and publishes `RING`, `CALL`, `CONNECT`, and `DISCONNECT` events.
 
@@ -80,13 +83,14 @@ ip: 192.168.178.1
 port: 49000
 user: homeassistant
 password: secret
-call_lists: all,incoming,outgoing,missed
+call_lists: all,incoming,outgoing,missed,rejected,blocked
 phonebooks: all
 phonebook_names: 3:tellows Sperrliste 7,4:tellows Sperrliste 8-9
 phonebook_name_excludes: ""
 call_monitor_enabled: true
 call_monitor_port: 1012
 max_calls: 20
+max_live_events: 20
 ```
 
 MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.
