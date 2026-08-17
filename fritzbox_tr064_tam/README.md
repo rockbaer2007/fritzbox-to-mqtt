@@ -34,6 +34,7 @@ WAN PPP/IP control URLs are discovered from the FRITZ!Box service descriptions s
 Control names from the service descriptions are normalized automatically, for example `wanpppconn1` can be called through `/upnp/control/wanpppconn1` or `/wanpppconn1` depending on the model.
 IPv6 additionally uses the FHEM-style `X_AVM_DE_GetExternalIPv6Address` action and `X_AVM-DE_AppSetup.GetAppRemoteInfo` as fallbacks.
 Following FritzSmart, `query.lua` is used for `ipv6:settings/ip` and `dnscfg:settings/dns_over_tls_enabled` when available.
+Web fallbacks use the FRITZ!Box web interface on `http(s)://<ip>/`, not the TR-064 port.
 `Box Mesh Rolle`, `Box PPP Verbindung`, `Box PPP IPv4 Extern`, and `Box IPv6 Extern` are text sensors and publish `unknown` when the FRITZ!Box does not expose a value.
 `Box DNS over TLS` is a binary sensor. It remains unavailable/unknown when the FRITZ!Box does not expose this setting through the queried interfaces.
 

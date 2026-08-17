@@ -11,7 +11,7 @@ import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from hashlib import md5
+from hashlib import md5, pbkdf2_hmac
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -187,6 +187,7 @@ class FritzBoxTr064Client:
         scheme = "https" if options.fritz_ssl else "http"
         self.options = options
         self.base_url = f"{scheme}://{options.fritz_host}:{options.fritz_port}"
+        self.web_base_url = f"{scheme}://{options.fritz_host}"
         self.session = requests.Session()
         self.session.auth = HTTPDigestAuth(options.fritz_username, options.fritz_password)
         self.session.verify = False
@@ -628,20 +629,23 @@ class FritzBoxTr064Client:
     def _lua_data(self, params: dict[str, str]) -> dict[str, Any]:
         sid = self._fritz_sid()
         query = dict(params)
-        query["sid"] = sid
-        response = self.session.get(urllib.parse.urljoin(self.base_url + "/", "data.lua"), params=query, timeout=15)
+        response = self.session.post(
+            urllib.parse.urljoin(self.web_base_url + "/", f"data.lua?sid={urllib.parse.quote(sid)}"),
+            data=query,
+            timeout=15,
+        )
         response.raise_for_status()
         return response.json()
 
     def _lua_query(self, query: dict[str, str]) -> dict[str, Any]:
         sid = self._fritz_sid()
         params = {"sid": sid, **query}
-        response = self.session.get(urllib.parse.urljoin(self.base_url + "/", "query.lua"), params=params, timeout=15)
+        response = self.session.get(urllib.parse.urljoin(self.web_base_url + "/", "query.lua"), params=params, timeout=15)
         response.raise_for_status()
         return response.json()
 
     def _fritz_sid(self) -> str:
-        response = self.session.get(urllib.parse.urljoin(self.base_url + "/", "login_sid.lua?version=2"), timeout=15)
+        response = self.session.get(urllib.parse.urljoin(self.web_base_url + "/", "login_sid.lua?version=2"), timeout=15)
         response.raise_for_status()
         root = ET.fromstring(response.content)
         sid = find_text(root, "SID").strip()
@@ -651,13 +655,13 @@ class FritzBoxTr064Client:
         if not challenge:
             raise RuntimeError("FRITZ!Box login challenge missing")
         password = self.options.fritz_password
-        digest = md5(f"{challenge}-{password}".encode("utf-16le")).hexdigest()
+        challenge_response = fritz_login_response(challenge, password)
         login = self.session.get(
-            urllib.parse.urljoin(self.base_url + "/", "login_sid.lua"),
+            urllib.parse.urljoin(self.web_base_url + "/", "login_sid.lua"),
             params={
                 "version": "2",
                 "username": self.options.fritz_username,
-                "response": f"{challenge}-{digest}",
+                "response": challenge_response,
             },
             timeout=15,
         )
@@ -1940,6 +1944,21 @@ def first_nested_value(values: dict[str, Any], paths: list[list[str]]) -> str:
             if text:
                 return text
     return ""
+
+
+def fritz_login_response(challenge: str, password: str) -> str:
+    if challenge.startswith("2$"):
+        parts = challenge.split("$")
+        if len(parts) >= 5:
+            iter1 = int(parts[1])
+            salt1 = bytes.fromhex(parts[2])
+            iter2 = int(parts[3])
+            salt2 = bytes.fromhex(parts[4])
+            hash1 = pbkdf2_hmac("sha256", password.encode("utf-8"), salt1, iter1)
+            hash2 = pbkdf2_hmac("sha256", hash1, salt2, iter2)
+            return f"2${parts[4]}${hash2.hex()}"
+    digest = md5(f"{challenge}-{password}".encode("utf-16le")).hexdigest()
+    return f"{challenge}-{digest}"
 
 
 def ipv6_from_text(value: str) -> str:
