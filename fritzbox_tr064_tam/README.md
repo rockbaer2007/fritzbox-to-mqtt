@@ -72,8 +72,10 @@ user: homeassistant
 password: secret
 call_lists: all,incoming,outgoing,missed
 phonebooks: all
+phonebook_name_excludes: tellows
 max_calls: 20
 ```
 
 MQTT host, port, username and password are requested from Home Assistant's internal MQTT service automatically.
 `phonebooks` is the startup selection; after the first successful scan, use the `Telefonbuch Anzeige` select entity in Home Assistant.
+`phonebook_name_excludes` hides matching FRITZ!Box phonebook names from the list, for example `tellows`.

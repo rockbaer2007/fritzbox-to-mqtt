@@ -1,5 +1,5 @@
 name: FritzBox TR-064 TAM MQTT
-version: "0.1.4"
+version: "0.1.5"
 slug: fritzbox_tr064_tam
 description: Publish FRITZ!Box answering machine and WAN data to Home Assistant via MQTT Discovery
 url: https://github.com/local/fritzbox-tr064-ha-addon
@@ -21,6 +21,7 @@ options:
   password: ""
   call_lists: all,incoming,outgoing,missed
   phonebooks: all
+  phonebook_name_excludes: tellows
   max_calls: 20
 schema:
   ip: str
@@ -29,4 +30,5 @@ schema:
   password: password
   call_lists: str
   phonebooks: str
+  phonebook_name_excludes: str
   max_calls: int(1,100)

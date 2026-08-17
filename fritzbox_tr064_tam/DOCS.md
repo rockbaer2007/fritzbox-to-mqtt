@@ -9,6 +9,7 @@ user: homeassistant
 password: secret
 call_lists: all,incoming,outgoing,missed
 phonebooks: all
+phonebook_name_excludes: tellows
 max_calls: 20
 ```
 
@@ -26,6 +27,7 @@ Only readable FRITZ!Box features are published to Home Assistant; missing option
 
 `phonebooks` can be `all` or a comma-separated list of FRITZ!Box phonebook IDs, for example `0,1`.
 It is only the startup selection. After the first successful scan, the `Telefonbücher` sensor lists all detected phonebooks and the `Telefonbuch Anzeige` select entity can switch between `Alle Telefonbücher` and individual phonebooks.
+`phonebook_name_excludes` is a comma-separated name filter; by default, phonebooks with `tellows` in the name are hidden from the list and from `Alle Telefonbücher`.
 `max_calls` limits how many calls are included in the sensor attributes. The sensor state still reports the total count for the selected list.
 
 The add-on probes answering machine indexes `0` to `max_tam - 1` and publishes discovery only for readable/present entries.

@@ -59,6 +59,7 @@ class Options:
     max_wlan: int
     call_lists: str
     phonebooks: str
+    phonebook_name_excludes: str
     max_calls: int
     retain: bool
 
@@ -240,7 +241,7 @@ class FritzBoxTr064Client:
         if not url:
             return PhonebookInfo(phonebook_id, f"Telefonbuch {phonebook_id}", [])
         root = self._get_xml_url(url)
-        name = root.attrib.get("name") or find_text(root, "Name") or f"Telefonbuch {phonebook_id}"
+        name = phonebook_xml_name(root) or f"Telefonbuch {phonebook_id}"
         contacts: list[dict[str, str]] = []
         for contact in root.findall(".//contact"):
             person = contact.find("person")
@@ -783,9 +784,10 @@ def run() -> None:
                     all_phonebooks.append(fritz.get_phonebook_info(phonebook_id))
                 except Exception as exc:
                     LOG.debug("Phonebook %s not available or not readable: %s", phonebook_id, exc)
+            all_phonebooks = visible_phonebooks(all_phonebooks, options.phonebook_name_excludes)
             selected_phonebook_ids = selected_phonebooks(
                 publisher.selected_phonebook,
-                [phonebook.phonebook_id for phonebook in all_phonebooks],
+                all_phonebooks,
             )
             phonebooks = [phonebook for phonebook in all_phonebooks if phonebook.phonebook_id in selected_phonebook_ids]
             call_views = selected_call_views(options.call_lists)
@@ -842,6 +844,7 @@ def load_options() -> Options:
         max_wlan=max(1, min(5, int(raw.get("max_wlan", 4)))),
         call_lists=str(raw.get("call_lists", "all,incoming,outgoing,missed")),
         phonebooks=str(raw.get("phonebooks", "all")),
+        phonebook_name_excludes=str(raw.get("phonebook_name_excludes", "tellows")),
         max_calls=max(1, min(100, int(raw.get("max_calls", 20)))),
         retain=bool(raw.get("retain", True)),
     )
@@ -853,12 +856,28 @@ def selected_call_views(value: str) -> set[str]:
     return selected or {"all"}
 
 
-def selected_phonebooks(value: str, available_ids: list[str]) -> list[str]:
+def selected_phonebooks(value: str, available_phonebooks: list[PhonebookInfo]) -> list[str]:
     requested = [phonebook_selection_value(item) for item in value.split(",") if item.strip()]
+    available_ids = [phonebook.phonebook_id for phonebook in available_phonebooks]
     if not requested or any(item.lower() == "all" for item in requested):
         return available_ids
-    available = set(available_ids)
-    return [item for item in requested if item in available]
+    selected: list[str] = []
+    for item in requested:
+        matched = phonebook_id_for_selection(item, available_phonebooks)
+        if matched and matched not in selected:
+            selected.append(matched)
+    return selected
+
+
+def visible_phonebooks(phonebooks: list[PhonebookInfo], excludes: str) -> list[PhonebookInfo]:
+    blocked = [item.strip().lower() for item in excludes.split(",") if item.strip()]
+    if not blocked:
+        return phonebooks
+    return [
+        phonebook
+        for phonebook in phonebooks
+        if not any(pattern in phonebook.name.lower() for pattern in blocked)
+    ]
 
 
 def phonebook_select_options(phonebooks: list[PhonebookInfo]) -> list[str]:
@@ -874,7 +893,7 @@ def phonebook_selection_label(value: str, phonebooks: list[PhonebookInfo]) -> st
     if selection == "all":
         return "Alle Telefonbücher"
     for phonebook in phonebooks:
-        if phonebook.phonebook_id == selection:
+        if phonebook.phonebook_id == selection or phonebook.name.lower() == selection.lower():
             return phonebook_option_label(phonebook)
     return value
 
@@ -884,6 +903,25 @@ def phonebook_selection_value(value: str) -> str:
     if not normalized or normalized.lower() in {"all", "alle", "alle telefonbücher", "alle telefonbuecher"}:
         return "all"
     return normalized.split(":", 1)[0].strip()
+
+
+def phonebook_id_for_selection(value: str, phonebooks: list[PhonebookInfo]) -> str | None:
+    normalized = phonebook_selection_value(value)
+    for phonebook in phonebooks:
+        if phonebook.phonebook_id == normalized:
+            return phonebook.phonebook_id
+        if phonebook.name.lower() == normalized.lower():
+            return phonebook.phonebook_id
+    return None
+
+
+def phonebook_xml_name(root: ET.Element) -> str:
+    for element in root.iter():
+        if element.tag.split("}")[-1].lower() == "phonebook":
+            name = element.attrib.get("name", "").strip()
+            if name:
+                return name
+    return (root.attrib.get("name") or find_text(root, "Name")).strip()
 
 
 def phonebook_summary(phonebook: PhonebookInfo) -> dict[str, Any]:
