@@ -331,7 +331,7 @@ class HomeAssistantMqttPublisher:
         self.known_wlan_indices: set[int] = set()
         self.known_call_views: set[str] = set()
         self.known_phonebook_ids: set[str] = set()
-        self.selected_phonebook = self.options.phonebooks.strip() or "all"
+        self.selected_phonebooks = self.options.phonebooks.strip() or "all"
 
     def start(self) -> None:
         self.client.on_connect = self._on_connect
@@ -434,9 +434,10 @@ class HomeAssistantMqttPublisher:
             })
 
         self._publish(f"{self.options.base_topic}/phonebooks/count", str(len(all_phonebooks)))
-        self._publish(f"{self.options.base_topic}/phonebooks/selection", phonebook_selection_label(self.selected_phonebook, all_phonebooks))
+        self._publish(f"{self.options.base_topic}/phonebooks/selection", phonebook_selection_label(self.selected_phonebooks, all_phonebooks))
+        self._publish(f"{self.options.base_topic}/phonebooks/selection_text", self.selected_phonebooks)
         self._publish_json(f"{self.options.base_topic}/phonebooks/attributes", {
-            "selected": self.selected_phonebook,
+            "selected": self.selected_phonebooks,
             "phonebooks": [phonebook_summary(phonebook) for phonebook in all_phonebooks],
         })
 
@@ -456,6 +457,7 @@ class HomeAssistantMqttPublisher:
         client.subscribe(f"{self.options.base_topic}/ab/+/enabled/set")
         client.subscribe(f"{self.options.base_topic}/wlan/+/enabled/set")
         client.subscribe(f"{self.options.base_topic}/phonebooks/selection/set")
+        client.subscribe(f"{self.options.base_topic}/phonebooks/selection_text/set")
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         topic = message.topic
@@ -468,6 +470,9 @@ class HomeAssistantMqttPublisher:
             self._handle_wlan_command(topic, payload)
             return
         if topic == f"{self.options.base_topic}/phonebooks/selection/set":
+            self._handle_phonebook_selection(raw_payload)
+            return
+        if topic == f"{self.options.base_topic}/phonebooks/selection_text/set":
             self._handle_phonebook_selection(raw_payload)
 
     def _handle_tam_command(self, topic: str, payload: str) -> None:
@@ -510,8 +515,9 @@ class HomeAssistantMqttPublisher:
 
     def _handle_phonebook_selection(self, payload: str) -> None:
         selection = phonebook_selection_value(payload)
-        self.selected_phonebook = selection
+        self.selected_phonebooks = selection
         self._publish(f"{self.options.base_topic}/phonebooks/selection", payload)
+        self._publish(f"{self.options.base_topic}/phonebooks/selection_text", selection)
         LOG.info("Selected phonebook display: %s", selection)
 
     def _publish_tam_discovery(self, index: int) -> None:
@@ -650,7 +656,7 @@ class HomeAssistantMqttPublisher:
         object_part = safe_object_part(phonebook.phonebook_id)
         prefix = f"{self.options.base_topic}/phonebook/{object_part}"
         self._publish_config("sensor", f"phonebook_{object_part}", {
-            "name": phonebook.name or f"Telefonbuch {phonebook.phonebook_id}",
+            "name": phonebook_entity_name(phonebook),
             "unique_id": f"fritzbox_tr064_phonebook_{object_part}",
             "state_topic": f"{prefix}/count",
             "json_attributes_topic": f"{prefix}/attributes",
@@ -687,6 +693,14 @@ class HomeAssistantMqttPublisher:
             "command_topic": f"{prefix}/selection/set",
             "options": phonebook_select_options(phonebooks),
             "icon": "mdi:book-cog",
+            "device": self._device(),
+        })
+        self._publish_config("text", "phonebook_selection_text", {
+            "name": "Telefonbücher Auswahl",
+            "unique_id": "fritzbox_tr064_phonebook_selection_text",
+            "state_topic": f"{prefix}/selection_text",
+            "command_topic": f"{prefix}/selection_text/set",
+            "icon": "mdi:book-edit",
             "device": self._device(),
         })
 
@@ -786,7 +800,7 @@ def run() -> None:
                     LOG.debug("Phonebook %s not available or not readable: %s", phonebook_id, exc)
             all_phonebooks = visible_phonebooks(all_phonebooks, options.phonebook_name_excludes)
             selected_phonebook_ids = selected_phonebooks(
-                publisher.selected_phonebook,
+                publisher.selected_phonebooks,
                 all_phonebooks,
             )
             phonebooks = [phonebook for phonebook in all_phonebooks if phonebook.phonebook_id in selected_phonebook_ids]
@@ -881,19 +895,30 @@ def visible_phonebooks(phonebooks: list[PhonebookInfo], excludes: str) -> list[P
 
 
 def phonebook_select_options(phonebooks: list[PhonebookInfo]) -> list[str]:
-    return ["Alle Telefonbücher"] + [phonebook_option_label(phonebook) for phonebook in phonebooks]
+    return ["Alle Telefonbücher", "Mehrere Telefonbücher"] + [phonebook_option_label(phonebook) for phonebook in phonebooks]
 
 
 def phonebook_option_label(phonebook: PhonebookInfo) -> str:
-    return f"{phonebook.phonebook_id}: {phonebook.name}"
+    return f"{phonebook_entity_name(phonebook)} ({phonebook.phonebook_id})"
+
+
+def phonebook_entity_name(phonebook: PhonebookInfo) -> str:
+    name = (phonebook.name or "").strip()
+    if not name:
+        return f"Telefonbuch {phonebook.phonebook_id}"
+    if name.lower() == "telefonbuch":
+        return f"Telefonbuch {phonebook.phonebook_id}"
+    return name
 
 
 def phonebook_selection_label(value: str, phonebooks: list[PhonebookInfo]) -> str:
     selection = phonebook_selection_value(value)
     if selection == "all":
         return "Alle Telefonbücher"
+    if "," in selection:
+        return "Mehrere Telefonbücher"
     for phonebook in phonebooks:
-        if phonebook.phonebook_id == selection or phonebook.name.lower() == selection.lower():
+        if phonebook.phonebook_id == selection or phonebook_entity_name(phonebook).lower() == selection.lower():
             return phonebook_option_label(phonebook)
     return value
 
@@ -902,7 +927,20 @@ def phonebook_selection_value(value: str) -> str:
     normalized = value.strip()
     if not normalized or normalized.lower() in {"all", "alle", "alle telefonbücher", "alle telefonbuecher"}:
         return "all"
-    return normalized.split(":", 1)[0].strip()
+    if "," in normalized:
+        return ",".join(phonebook_selection_value(item) for item in normalized.split(",") if item.strip())
+    if ":" in normalized:
+        return normalized.split(":", 1)[0].strip()
+    if normalized.lower() == "mehrere telefonbücher":
+        return "all"
+    match = re.match(r"^(.*?)\s+\(([^)]+)\)$", normalized)
+    if match:
+        name_part = match.group(1).strip()
+        id_part = match.group(2).strip()
+        if id_part:
+            return id_part
+        return name_part
+    return normalized
 
 
 def phonebook_id_for_selection(value: str, phonebooks: list[PhonebookInfo]) -> str | None:
@@ -911,6 +949,8 @@ def phonebook_id_for_selection(value: str, phonebooks: list[PhonebookInfo]) -> s
         if phonebook.phonebook_id == normalized:
             return phonebook.phonebook_id
         if phonebook.name.lower() == normalized.lower():
+            return phonebook.phonebook_id
+        if phonebook_entity_name(phonebook).lower() == normalized.lower():
             return phonebook.phonebook_id
     return None
 

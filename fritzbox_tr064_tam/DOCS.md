@@ -27,6 +27,7 @@ Only readable FRITZ!Box features are published to Home Assistant; missing option
 
 `phonebooks` can be `all` or a comma-separated list of FRITZ!Box phonebook IDs, for example `0,1`.
 It is only the startup selection. After the first successful scan, the `Telefonbücher` sensor lists all detected phonebooks and the `Telefonbuch Anzeige` select entity can switch between `Alle Telefonbücher` and individual phonebooks.
+For several selected phonebooks at once, use the `Telefonbücher Auswahl` text entity with comma-separated IDs or names, for example `0,2` or `Privat,Firma`.
 `phonebook_name_excludes` is a comma-separated name filter; by default, phonebooks with `tellows` in the name are hidden from the list and from `Alle Telefonbücher`.
 `max_calls` limits how many calls are included in the sensor attributes. The sensor state still reports the total count for the selected list.
 

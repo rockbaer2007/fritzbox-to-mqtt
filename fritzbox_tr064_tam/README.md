@@ -36,11 +36,13 @@ Phonebook entities, depending on `phonebooks`:
 
 - `Telefonbücher`
 - `Telefonbuch Anzeige`
+- `Telefonbücher Auswahl`
 - detected FRITZ!Box phonebooks by their FRITZ!Box names
 - further detected FRITZ!Box phonebooks
 
 `Telefonbücher` lists all detected FRITZ!Box phonebooks in its attributes.
 `Telefonbuch Anzeige` is a Home Assistant select entity for choosing `Alle Telefonbücher` or one detected phonebook.
+`Telefonbücher Auswahl` accepts comma-separated IDs or names for showing several phonebooks, for example `0,2` or `Privat,Firma`.
 Each selected phonebook sensor reports the contact count as its state and exposes the FRITZ!Box phonebook name as an attribute.
 
 Detected WLAN services:
