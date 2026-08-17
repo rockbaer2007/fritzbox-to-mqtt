@@ -1,5 +1,5 @@
 name: FritzBox TR-064 TAM MQTT
-version: "0.1.1"
+version: "0.1.2"
 slug: fritzbox_tr064_tam
 description: Publish FRITZ!Box answering machine and WAN data to Home Assistant via MQTT Discovery
 url: https://github.com/local/fritzbox-tr064-ha-addon

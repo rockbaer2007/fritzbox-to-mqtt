@@ -743,28 +743,28 @@ def run() -> None:
                     if info.present:
                         tam_infos.append(info)
                 except Exception as exc:
-                    LOG.info("AB%s not available or not readable: %s", index, exc)
+                    LOG.debug("AB%s not available or not readable: %s", index, exc)
             for index in range(1, options.max_wlan + 1):
                 try:
                     wlan_infos.append(fritz.get_wlan_info(index))
                 except Exception as exc:
-                    LOG.info("WLAN%s not available or not readable: %s", index, exc)
+                    LOG.debug("WLAN%s not available or not readable: %s", index, exc)
             try:
                 calls = fritz.get_call_entries()
             except Exception as exc:
-                LOG.info("Call list not available or not readable: %s", exc)
+                LOG.debug("Call list not available or not readable: %s", exc)
                 calls = []
             try:
                 all_phonebook_ids = fritz.get_phonebook_ids()
             except Exception as exc:
-                LOG.info("Phonebooks not available or not readable: %s", exc)
+                LOG.debug("Phonebooks not available or not readable: %s", exc)
                 all_phonebook_ids = []
             all_phonebooks = []
             for phonebook_id in all_phonebook_ids:
                 try:
                     all_phonebooks.append(fritz.get_phonebook_info(phonebook_id))
                 except Exception as exc:
-                    LOG.info("Phonebook %s not available or not readable: %s", phonebook_id, exc)
+                    LOG.debug("Phonebook %s not available or not readable: %s", phonebook_id, exc)
             selected_phonebook_ids = selected_phonebooks(
                 publisher.selected_phonebook,
                 [phonebook.phonebook_id for phonebook in all_phonebooks],
