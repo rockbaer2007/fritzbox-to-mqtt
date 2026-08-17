@@ -23,6 +23,8 @@ WAN entities:
 - `Uploadrate`
 - `WAN Link Status`
 
+Current upload/download rates use TR-064 WAN data. If the FRITZ!Box does not expose direct rate values, the add-on calculates them from total byte counters between polls.
+
 Call list entities, depending on `call_lists`:
 
 - `Alle Anrufe`

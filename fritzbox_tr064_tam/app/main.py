@@ -223,6 +223,28 @@ class FritzBoxTr064Client:
         except Exception as exc:
             LOG.debug("Could not read WAN addon infos: %s", exc)
 
+        try:
+            sent = self._soap(
+                "/upnp/control/wancommonifconfig1",
+                WAN_COMMON_SERVICE,
+                "GetTotalBytesSent",
+                {},
+            )
+            result["total_bytes_sent"] = as_int(sent.get("NewTotalBytesSent"))
+        except Exception as exc:
+            LOG.debug("Could not read WAN total bytes sent: %s", exc)
+
+        try:
+            received = self._soap(
+                "/upnp/control/wancommonifconfig1",
+                WAN_COMMON_SERVICE,
+                "GetTotalBytesReceived",
+                {},
+            )
+            result["total_bytes_received"] = as_int(received.get("NewTotalBytesReceived"))
+        except Exception as exc:
+            LOG.debug("Could not read WAN total bytes received: %s", exc)
+
         return result
 
     def get_call_entries(self) -> list[CallEntry]:
@@ -897,9 +919,11 @@ def run() -> None:
     publisher.start()
     call_monitor = FritzBoxCallMonitor(options, publisher, stop_event)
     call_monitor.start()
+    last_wan_totals: dict[str, float] | None = None
 
     try:
         while not stop_event.is_set():
+            poll_started = time.monotonic()
             tam_infos: list[TamInfo] = []
             wlan_infos: list[WlanInfo] = []
             for index in range(options.max_tam):
@@ -941,8 +965,10 @@ def run() -> None:
             present_tam = {info.index for info in tam_infos}
             present_wlan = {info.index for info in wlan_infos}
             present_phonebooks = {phonebook.phonebook_id for phonebook in phonebooks}
+            wan = fritz.get_wan_common()
+            last_wan_totals = apply_wan_rate_fallback(wan, last_wan_totals, poll_started)
             publisher.publish_discovery(present_tam, present_wlan, call_views, present_phonebooks, all_phonebooks)
-            publisher.publish_states(tam_infos, wlan_infos, fritz.get_wan_common(), calls, call_views, phonebooks, all_phonebooks)
+            publisher.publish_states(tam_infos, wlan_infos, wan, calls, call_views, phonebooks, all_phonebooks)
             LOG.info(
                 "Published %s answering machines, %s WLAN services, %s call views, %s selected phonebooks, %s listed phonebooks and WAN state",
                 len(tam_infos),
@@ -1000,6 +1026,33 @@ def load_options() -> Options:
         max_live_events=max(1, min(100, int(raw.get("max_live_events", 20)))),
         retain=bool(raw.get("retain", True)),
     )
+
+
+def apply_wan_rate_fallback(
+    wan: dict[str, Any],
+    previous: dict[str, float] | None,
+    timestamp: float,
+) -> dict[str, float] | None:
+    sent = wan.get("total_bytes_sent")
+    received = wan.get("total_bytes_received")
+    current: dict[str, float] = {"timestamp": timestamp}
+    if isinstance(sent, int):
+        current["sent"] = float(sent)
+    if isinstance(received, int):
+        current["received"] = float(received)
+    if "sent" not in current and "received" not in current:
+        return previous
+    if previous is not None:
+        seconds = max(0.001, timestamp - previous.get("timestamp", timestamp))
+        if as_int(wan.get("byte_send_rate")) <= 0 and "sent" in current and "sent" in previous:
+            delta = current["sent"] - previous["sent"]
+            if delta >= 0:
+                wan["byte_send_rate"] = int(delta / seconds)
+        if as_int(wan.get("byte_receive_rate")) <= 0 and "received" in current and "received" in previous:
+            delta = current["received"] - previous["received"]
+            if delta >= 0:
+                wan["byte_receive_rate"] = int(delta / seconds)
+    return current
 
 
 def selected_call_views(value: str) -> set[str]:
